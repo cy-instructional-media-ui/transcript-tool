@@ -57,16 +57,34 @@ You are a deterministic SRT formatting engine. You follow rules, not preferences
 Transcripts often contain hallucinated or auto-generated garbage at the very end like "You.", "Subtitles by...", or single words that do not match the audio. REMOVE THESE.
 
 ====================
-SCIENTIFIC NOTATION RULES (DO NOT BREAK)
+CHEMISTRY CONSISTENCY RULES (STRICT)
 ====================
-You MUST preserve correct biochemical notation:
+• Do NOT convert written chemical words into formulas.
+  - "carbon dioxide" must remain "carbon dioxide".
+  - "nicotinamide adenine dinucleotide" must remain as written.
+  
+• Only convert **explicit chemical formulas** found in the transcript:
+  - CO2 → CO₂
+  - FADH2 → FADH₂
+  - FADH-2 → FADH₂
+  - H2O → H₂O
+  - NADH must ALWAYS remain exactly "NADH".
+  - Never rewrite NADH as NADH₂ or any variant.
 
-• NADH must ALWAYS remain exactly "NADH" (no subscripts).
-• FADH2 (from transcript) may be converted to proper Unicode "FADH₂".
-• CO2 (from transcript) may be converted to "CO₂".
-• H2O (from transcript) may be converted to "H₂O".
-• Do NOT add subscripts or superscripts to any other molecule unless the transcript explicitly contains them.
-• NEVER infer or guess chemical formulas. Only correct them if they are unambiguously standard notation.
+• NEVER rewrite "dioxide" as "CO₂".
+• NEVER rewrite "oxygen" as "O₂".
+• NEVER rewrite "hydrogen" as "H₂".
+• NEVER infer or guess chemical formulas.
+
+If the transcript uses words, keep words.
+If the transcript uses formulas, keep formulas.
+
+====================
+REPETITION RULES
+====================
+- **NO HALLUCINATED REPETITION:** Do not duplicate clauses or sentences (e.g. "So if you are doing / if you are doing").
+- If the output contains two identical back-to-back lines/phrases, **DELETE ONE**.
+- Ensure clean flow without accidental stammers unless they are explicitly in the source text.
 
 ====================
 MERGING RULES (STRICT)
@@ -342,7 +360,8 @@ export const generateSrt = async (
   prompt += `\n\n**CRITICAL INSTRUCTIONS:**
   1. Apply the **strict merging rules** from the system instruction.
   2. If two consecutive buckets meet the merge conditions (<=50 chars, flow together), you **MUST** merge them.
-  3. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY (for the first word of the block).`;
+  3. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY (for the first word of the block).
+  4. Ensure no phrases are accidentally repeated (deduplicate back-to-back phrases).`;
   
   prompt += `\n\nTranscript:\n${text}`;
 
@@ -358,10 +377,12 @@ export const generateSrt = async (
   let cleanText = response.text || "";
   cleanText = cleanText.replace(/^```srt\n/, '').replace(/^```\n/, '').replace(/^```/, '').replace(/```$/, '');
   
-  // Safety patch for hallucinated chemistry
+  // Safety patch for hallucinated chemistry and cleanup
   cleanText = cleanText
-    .replace(/\bNADH₂\b/g, "NADH")  // undo hallucination
-    .replace(/\bNADH2\b/g, "NADH");
+    .replace(/\bcarbon CO₂\b/gi, "carbon dioxide")
+    .replace(/\bCO₂ dioxide\b/gi, "carbon dioxide")
+    .replace(/\bNADH₂\b/gi, "NADH")  // undo hallucination
+    .replace(/\bNADH2\b/gi, "NADH");
 
   // Run timing refinement
   return refineSrtTiming(cleanText.trim());
