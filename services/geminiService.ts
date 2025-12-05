@@ -16,14 +16,21 @@ const MODEL_NAME = "gemini-2.5-flash";
 const OBFUSCATED_KEY = ""; 
 
 const getApiKey = (): string => {
-  // Priority 1: Environment Variable (Vercel/Netlify Environment Variables)
+  // Priority 1: Vite Environment Variable (Standard for Vercel+Vite)
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_KEY) {
+    // @ts-ignore
+    return import.meta.env.VITE_API_KEY;
+  }
+
+  // Priority 2: Standard Process Environment (Legacy)
   // @ts-ignore
   if (typeof process !== 'undefined' && process.env?.API_KEY) {
     // @ts-ignore
     return process.env.API_KEY;
   }
 
-  // Priority 2: Obfuscated Key (Client-side fallback)
+  // Priority 3: Obfuscated Key (Client-side fallback)
   if (OBFUSCATED_KEY) {
     try {
       return atob(OBFUSCATED_KEY);
@@ -32,14 +39,14 @@ const getApiKey = (): string => {
     }
   }
 
-  // Priority 3: Global Window Variable (Legacy/Injection)
+  // Priority 4: Global Window Variable (Legacy/Injection)
   // @ts-ignore
   if (typeof window !== 'undefined' && window.GOOGLE_API_KEY) {
     // @ts-ignore
     return window.GOOGLE_API_KEY;
   }
 
-  console.warn("API Key missing. Please set API_KEY in your Vercel/Netlify settings.");
+  console.warn("API Key missing. Please set VITE_API_KEY in your Vercel/Netlify settings.");
   return "";
 };
 
@@ -97,7 +104,10 @@ const isSignificantChange = (original: string, correction: string): boolean => {
 };
 
 export const validateTimestamps = async (text: string): Promise<boolean> => {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API Key is missing");
+
+  const ai = new GoogleGenAI({ apiKey });
   
   try {
     const response = await ai.models.generateContent({
@@ -121,7 +131,10 @@ export const validateTimestamps = async (text: string): Promise<boolean> => {
 };
 
 export const proposeCorrections = async (text: string): Promise<SpellingCorrection[]> => {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API Key is missing");
+
+  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
     Analyze this transcript for **TRANSCRIPTION ERRORS** (Spelling, Homophones, and Misheard Words).
@@ -272,7 +285,10 @@ export const generateSrt = async (
   mode: CorrectionMode,
   approvedCorrections: SpellingCorrection[] = []
 ): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API Key is missing");
+
+  const ai = new GoogleGenAI({ apiKey });
 
   let prompt = `Convert the following transcript into a valid SRT file. `;
 
