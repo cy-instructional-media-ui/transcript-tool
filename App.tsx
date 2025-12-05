@@ -278,7 +278,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="bg-gray-800 text-gray-300 py-6 text-center text-sm">
-        <p>CC by Cyrus Helf, LACCD</p>
+        <p>MIT License © Cy-Instructional-Media</p>
         <p className="mt-2 text-xs text-gray-400">
           This tool processes text locally and via secure AI APIs. No data is stored permanently.
         </p>
