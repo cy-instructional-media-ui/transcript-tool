@@ -51,47 +51,53 @@ const getApiKey = (): string => {
 };
 
 const BASE_SYSTEM_INSTRUCTION = `
-You are a strict SRT formatting engine. You are NOT a creative writer.
+You are a strict, rule-based SRT formatting engine.
+Your goal is to maximize readability while minimizing screen obstruction.
 
-**CORE TASK:**
-Convert the provided transcript into valid SRT format.
+**DO NOT CHANGE:**
+- Timestamp bucket boundaries (unless merging according to rules below).
+- Start times of the first word in a block.
+- Word order (except approved corrections).
+- The meaning of the text.
 
-**CRITICAL RULE: SYNCHRONIZATION OVER SENTENCE STRUCTURE**
-- Your #1 priority is matching text to its specific timestamp.
-- **NEVER** fix a broken sentence by moving text from a later timestamp to an earlier one.
-- It is better to have a sentence fragment than to have the audio out of sync.
-- **ANTI-DRIFT:** If the transcript says a phrase starts at 0:10, you MUST NOT start it at 0:05 just because it fits the previous sentence better.
+**LINE LENGTH RULES:**
+- **Target ≤ 50 characters per line.**
+- Max 2 lines per subtitle block.
+- **Prefer single-line subtitles whenever possible.**
+- Avoid tall, heavy blocks that obscure the video.
+- NEVER leave a single word (like "this", "our", "the") hanging on a second line if it can fit on the first line.
 
-**THE BUCKET RULE (DO NOT IGNORE):**
-The transcript provides "buckets" of text starting at specific times.
-- IF Input is: "0:10 I am going to" and "0:15 the store."
-- OUTPUT MUST BE: 
-   1 (00:00:10 --> ...) "I am going to"
-   2 (00:00:15 --> ...) "the store."
-- **WRONG OUTPUT:** 1 (00:00:10 --> ...) "I am going to the store." (This is INCORRECT because you stole text from 0:15).
-- **NEVER** move text backwards to a previous timestamp block to fix grammar.
+**MERGING RULES (SMART CONDENSING):**
+You may merge two timestamp buckets (lines from input) into ONE subtitle block ONLY IF all of the following are true:
+1. The combined text is **50 characters or fewer**.
+2. Merging does NOT create more than 2 lines per subtitle block.
+3. The first line does NOT end with a hard stop (. ? !).
+4. The two lines clearly form a continuous phrase (not separate ideas).
+5. The result does not create large 2-line blocks that could obscure the screen.
 
-**TIMING RULES:**
-1. **Hard Anchors:** The start time of a subtitle block MUST MATCH the source timestamp exactly.
-2. **Splitting:** If a text segment is too long (>42 chars/line or >2 lines), you must split it.
-   - Part 1 starts at the anchor time.
-   - Part 2 starts immediately after Part 1 (interpolated).
-   - ALL parts must finish before the *next* anchor timestamp starts.
+**WHEN TO MERGE:**
+Merge when the first line ends with a soft connector such as:
+- comma, semicolon, colon
+- "and", "but", "so", "or", "because", "then"
+- or any short connecting phrase that clearly continues the sentence.
 
-**FORMATTING:**
-1. Max 2 lines per block.
-2. ~42 characters per line.
-3. Remove junk endings (e.g., "You.", "Copyright").
+**WHEN NOT TO MERGE:**
+- Do NOT merge if lines represent different ideas.
+- Do NOT merge if it creates a run-on sentence.
+- Do NOT merge if it exceeds 50 characters.
+
+**TIMING & SYNCHRONIZATION (CRITICAL):**
+- **Hard Anchors:** The start time of a subtitle block MUST MATCH the source timestamp of the first word in that block exactly.
+- **Interpolation:** If you split a text segment, interpolated start times must be sequential.
+- **Anti-Drift:** NEVER move text to an earlier timestamp to make a sentence "look correct". If the transcript says a word happens at 0:10, it cannot appear in a block starting at 0:05.
 
 **SRT Output Format:**
 1
 00:00:00,000 --> 00:00:04,000
 Line 1 text
-Line 2 text
+Line 2 text (optional)
 
-2
-00:00:04,050 --> 00:00:08,000
-Next text
+(Blank line between blocks)
 `;
 
 // Helper to determine if a correction is significant (word change) or just punctuation/case
@@ -315,7 +321,7 @@ export const generateSrt = async (
     ${approvedCorrections.map(c => `- Change "${c.original}" to "${c.correction}" near ${c.timestamp}`).join('\n')}`;
   }
 
-  prompt += `\n\nREMINDER: Strict max 42 chars per line, max 2 lines per block. Split blocks if necessary. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY. DO NOT MOVE TEXT BETWEEN TIMESTAMP BUCKETS.`;
+  prompt += `\n\nREMINDER: Target max 50 chars per line. Prefer single lines. Merge short phrases if they flow. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY (for the first word of the block).`;
   prompt += `\n\nTranscript:\n${text}`;
 
   const response = await ai.models.generateContent({
