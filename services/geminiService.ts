@@ -361,7 +361,11 @@ export const generateSrt = async (
     ${approvedCorrections.map(c => `- Change "${c.original}" to "${c.correction}" near ${c.timestamp}`).join('\n')}`;
   }
 
-  prompt += `\n\nREMINDER: Strict max 42 chars per line, max 2 lines per block. Split blocks if necessary. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY. DO NOT MOVE TEXT BETWEEN TIMESTAMP BUCKETS.`;
+  prompt += `\n\nREMINDER: Max ~50 characters per line. Prefer one-line subtitles when possible. 
+Merge lines ONLY when the merged line is 50 characters or fewer.
+Do not create tall two-line blocks unless absolutely necessary.
+Never move text between timestamp buckets.
+ Split blocks if necessary. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY. DO NOT MOVE TEXT BETWEEN TIMESTAMP BUCKETS.`;
   prompt += `\n\nTranscript:\n${text}`;
 
   const response = await ai.models.generateContent({
