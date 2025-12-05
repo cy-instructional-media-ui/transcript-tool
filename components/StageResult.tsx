@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { SupportedLanguage, SUPPORTED_LANGUAGES } from '../types';
 import { translateSrt } from '../services/geminiService';
+import AccessibleSelect from '../components/AccessibleSelect';
 
 interface Props {
   srtContent: string;
@@ -118,17 +119,14 @@ const StageResult: React.FC<Props> = ({ srtContent: initialSrtContent, onRestart
           <div className="space-y-3">
             <div>
               <label htmlFor="language-select" className="sr-only">Select Language</label>
-              <select
+              <AccessibleSelect
                 id="language-select"
+                label="Select Language"
                 value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value as SupportedLanguage)}
-                className="w-full p-2.5 bg-white border border-gray-300 rounded-lg text-gray-900 text-sm focus:ring-blue-500 focus:border-blue-500"
+                onChange={setSelectedLanguage}
+                options={SUPPORTED_LANGUAGES}
                 disabled={isTranslating}
-              >
-                {SUPPORTED_LANGUAGES.map(lang => (
-                  <option key={lang} value={lang}>{lang}</option>
-                ))}
-              </select>
+              />
             </div>
             
             <button
