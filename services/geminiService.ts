@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { CorrectionMode, SpellingCorrection } from "../types";
+import { CorrectionMode, SpellingCorrection, SupportedLanguage } from "../types";
 
 // Using Gemini 2.5 Flash
 const MODEL_NAME = "gemini-2.5-flash";
@@ -133,6 +134,81 @@ text line 1
 text line 2
 
 (Blank line between blocks)
+`;
+
+const TRANSLATION_SYSTEM_INSTRUCTION = `
+You are a strict, rule-based multilingual SRT translation engine.
+
+Your job is to take an existing English SRT file and translate ONLY the subtitle text into the target language while preserving the entire SRT structure exactly.
+
+==========================
+CORE NON-NEGOTIABLE RULES
+==========================
+
+1. DO NOT change timestamps.
+   - Start and end times must remain exactly the same.
+   - Do not add or remove blocks.
+
+2. DO NOT modify the numbering of the subtitle blocks.
+
+3. DO NOT translate or modify:
+   - timestamps
+   - SRT formatting
+   - SRT arrows ( --> )
+   - blank lines
+
+4. TRANSLATE ONLY the spoken text.
+
+5. Preserve scientific notation:
+   - NADH stays NADH
+   - NAD⁺ stays NAD+
+   - FADH₂ stays FADH₂
+   - CO₂ stays CO₂
+   - Keep subscripts and superscripts exactly as written.
+
+6. Keep 1–2 subtitle lines maximum per block.
+   - Prefer **one line** when under 50 characters.
+   - If a translation becomes too long, split naturally across two clean lines.
+   - Do NOT create large blocks that obscure the screen.
+
+7. Preserve meaning accurately.
+   - Do not “simplify” or reinterpret content.
+   - Proper nouns should remain untranslated unless the language has a universally accepted localized version.
+
+8. The final output MUST be a valid SRT file with:
+   - Block number
+   - Timestamp line
+   - Translated text
+   - Blank line
+
+==========================
+LANGUAGE RULES
+==========================
+
+Translate the subtitle text into the requested target language.
+Supported languages:
+
+- English
+- Spanish
+- Chinese (Simplified)
+- Chinese (Traditional)
+- Tagalog (Filipino)
+- Korean
+- Armenian
+- Vietnamese
+- Farsi (Persian)
+- Japanese
+
+Use the correct writing system and natural phrasing for each language.
+
+==========================
+OUTPUT FORMAT
+==========================
+
+Return ONLY the SRT file.
+No backticks.
+No explanations.
+No commentary.
 `;
 
 // Helper to determine if a correction is significant (word change) or just punctuation/case
@@ -386,4 +462,35 @@ export const generateSrt = async (
 
   // Run timing refinement
   return refineSrtTiming(cleanText.trim());
+};
+
+export const translateSrt = async (
+  srtContent: string,
+  targetLanguage: SupportedLanguage
+): Promise<string> => {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API Key is missing");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `Translate the following SRT file into: ${targetLanguage}
+
+Keep all timestamps, numbering, spacing, and scientific notation unchanged.
+
+SRT:
+${srtContent}`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    config: {
+      systemInstruction: TRANSLATION_SYSTEM_INSTRUCTION,
+      temperature: 0.1, // Very low temperature for strict formatting compliance
+    },
+    contents: prompt,
+  });
+
+  let translatedText = response.text || "";
+  translatedText = translatedText.replace(/^```srt\n/, '').replace(/^```\n/, '').replace(/^```/, '').replace(/```$/, '');
+
+  return translatedText.trim();
 };
