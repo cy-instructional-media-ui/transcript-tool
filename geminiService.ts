@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
-import { CorrectionMode, SpellingCorrection } from "../types";
+import { CorrectionMode, SpellingCorrection, SupportedLanguage } from "../types";
 
 // Using Gemini 2.5 Flash
 const MODEL_NAME = "gemini-2.5-flash";
@@ -51,47 +52,163 @@ const getApiKey = (): string => {
 };
 
 const BASE_SYSTEM_INSTRUCTION = `
-You are a strict SRT formatting engine. You are NOT a creative writer.
+You are a deterministic SRT formatting engine. You follow rules, not preferences.
 
-**CORE TASK:**
-Convert the provided transcript into valid SRT format.
+**CRITICAL: Clean up the ending.**
+Transcripts often contain hallucinated or auto-generated garbage at the very end like "You.", "Subtitles by...", or single words that do not match the audio. REMOVE THESE.
 
-**CRITICAL RULE: SYNCHRONIZATION OVER SENTENCE STRUCTURE**
-- Your #1 priority is matching text to its specific timestamp.
-- **NEVER** fix a broken sentence by moving text from a later timestamp to an earlier one.
-- It is better to have a sentence fragment than to have the audio out of sync.
-- **ANTI-DRIFT:** If the transcript says a phrase starts at 0:10, you MUST NOT start it at 0:05 just because it fits the previous sentence better.
+====================
+CHEMISTRY CONSISTENCY RULES (STRICT)
+====================
+• Do NOT convert written chemical words into formulas.
+  - "carbon dioxide" must remain "carbon dioxide".
+  - "nicotinamide adenine dinucleotide" must remain as written.
+  
+• Only convert **explicit chemical formulas** found in the transcript:
+  - CO2 → CO₂
+  - FADH2 → FADH₂
+  - FADH-2 → FADH₂
+  - H2O → H₂O
+  - NADH must ALWAYS remain exactly "NADH".
+  - Never rewrite NADH as NADH₂ or any variant.
 
-**THE BUCKET RULE (DO NOT IGNORE):**
-The transcript provides "buckets" of text starting at specific times.
-- IF Input is: "0:10 I am going to" and "0:15 the store."
-- OUTPUT MUST BE: 
-   1 (00:00:10 --> ...) "I am going to"
-   2 (00:00:15 --> ...) "the store."
-- **WRONG OUTPUT:** 1 (00:00:10 --> ...) "I am going to the store." (This is INCORRECT because you stole text from 0:15).
-- **NEVER** move text backwards to a previous timestamp block to fix grammar.
+• NEVER rewrite "dioxide" as "CO₂".
+• NEVER rewrite "oxygen" as "O₂".
+• NEVER rewrite "hydrogen" as "H₂".
+• NEVER infer or guess chemical formulas.
 
-**TIMING RULES:**
-1. **Hard Anchors:** The start time of a subtitle block MUST MATCH the source timestamp exactly.
-2. **Splitting:** If a text segment is too long (>42 chars/line or >2 lines), you must split it.
-   - Part 1 starts at the anchor time.
-   - Part 2 starts immediately after Part 1 (interpolated).
-   - ALL parts must finish before the *next* anchor timestamp starts.
+If the transcript uses words, keep words.
+If the transcript uses formulas, keep formulas.
 
-**FORMATTING:**
-1. Max 2 lines per block.
-2. ~42 characters per line.
-3. Remove junk endings (e.g., "You.", "Copyright").
+====================
+REPETITION RULES
+====================
+- **NO HALLUCINATED REPETITION:** Do not duplicate clauses or sentences (e.g. "So if you are doing / if you are doing").
+- If the output contains two identical back-to-back lines/phrases, **DELETE ONE**.
+- Ensure clean flow without accidental stammers unless they are explicitly in the source text.
 
-**SRT Output Format:**
+====================
+MERGING RULES (STRICT)
+====================
+You MUST merge two consecutive timestamp buckets into ONE subtitle block when ALL conditions are true:
+1. The combined text is **50 characters or fewer**.
+2. The merged block contains no more than 2 lines.
+3. The first bucket does NOT end in ".", "?", "!".
+4. The second bucket continues the same phrase (not a new idea).
+5. Merging does NOT create a tall block that obstructs the video.
+
+When these rules are met, merging is **REQUIRED**, not optional.
+
+====================
+WHEN NOT TO MERGE
+====================
+Do NOT merge when:
+- The merged text exceeds 50 characters.
+- The first bucket ends in ".", "?", or "!".
+- The two lines form separate ideas.
+- Merging creates more than 2 lines.
+
+====================
+LINE FORMAT RULES
+====================
+- **Max 2 lines per block.**
+- **Max 50 characters per line.**
+- Prefer ONE line whenever possible.
+- NEVER leave a trailing orphan word on its own line.
+- Split long lines according to natural phrase boundaries.
+
+====================
+TIMING RULES
+====================
+- **Start time of each block MUST match the first timestamp in the bucket.**
+- Do not move text to earlier timestamps, even if grammatically tempting.
+- Splitting creates new blocks with interpolated start times.
+
+====================
+OUTPUT
+====================
+Produce valid SRT blocks:
 1
-00:00:00,000 --> 00:00:04,000
-Line 1 text
-Line 2 text
+00:00:00,000 --> 00:00:02,000
+text line 1
+text line 2
 
-2
-00:00:04,050 --> 00:00:08,000
-Next text
+(Blank line between blocks)
+`;
+
+const TRANSLATION_SYSTEM_INSTRUCTION = `
+You are a strict, rule-based multilingual SRT translation engine.
+
+Your job is to take an existing English SRT file and translate ONLY the subtitle text into the target language while preserving the entire SRT structure exactly.
+
+==========================
+CORE NON-NEGOTIABLE RULES
+==========================
+
+1. DO NOT change timestamps.
+   - Start and end times must remain exactly the same.
+   - Do not add or remove blocks.
+
+2. DO NOT modify the numbering of the subtitle blocks.
+
+3. DO NOT translate or modify:
+   - timestamps
+   - SRT formatting
+   - SRT arrows ( --> )
+   - blank lines
+
+4. TRANSLATE ONLY the spoken text.
+
+5. Preserve scientific notation:
+   - NADH stays NADH
+   - NAD⁺ stays NAD+
+   - FADH₂ stays FADH₂
+   - CO₂ stays CO₂
+   - Keep subscripts and superscripts exactly as written.
+
+6. Keep 1–2 subtitle lines maximum per block.
+   - Prefer **one line** when under 50 characters.
+   - If a translation becomes too long, split naturally across two clean lines.
+   - Do NOT create large blocks that obscure the screen.
+
+7. Preserve meaning accurately.
+   - Do not “simplify” or reinterpret content.
+   - Proper nouns should remain untranslated unless the language has a universally accepted localized version.
+
+8. The final output MUST be a valid SRT file with:
+   - Block number
+   - Timestamp line
+   - Translated text
+   - Blank line
+
+==========================
+LANGUAGE RULES
+==========================
+
+Translate the subtitle text into the requested target language.
+Supported languages:
+
+- English
+- Spanish
+- Chinese (Simplified)
+- Chinese (Traditional)
+- Tagalog (Filipino)
+- Korean
+- Armenian
+- Vietnamese
+- Farsi (Persian)
+- Japanese
+
+Use the correct writing system and natural phrasing for each language.
+
+==========================
+OUTPUT FORMAT
+==========================
+
+Return ONLY the SRT file.
+No backticks.
+No explanations.
+No commentary.
 `;
 
 // Helper to determine if a correction is significant (word change) or just punctuation/case
@@ -315,7 +432,13 @@ export const generateSrt = async (
     ${approvedCorrections.map(c => `- Change "${c.original}" to "${c.correction}" near ${c.timestamp}`).join('\n')}`;
   }
 
-  prompt += `\n\nREMINDER: Strict max 42 chars per line, max 2 lines per block. Split blocks if necessary. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY. DO NOT MOVE TEXT BETWEEN TIMESTAMP BUCKETS.`;
+  // Strong reinforcement of the strict merging rules
+  prompt += `\n\n**CRITICAL INSTRUCTIONS:**
+  1. Apply the **strict merging rules** from the system instruction.
+  2. If two consecutive buckets meet the merge conditions (<=50 chars, flow together), you **MUST** merge them.
+  3. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY (for the first word of the block).
+  4. Ensure no phrases are accidentally repeated (deduplicate back-to-back phrases).`;
+  
   prompt += `\n\nTranscript:\n${text}`;
 
   const response = await ai.models.generateContent({
@@ -330,6 +453,44 @@ export const generateSrt = async (
   let cleanText = response.text || "";
   cleanText = cleanText.replace(/^```srt\n/, '').replace(/^```\n/, '').replace(/^```/, '').replace(/```$/, '');
   
+  // Safety patch for hallucinated chemistry and cleanup
+  cleanText = cleanText
+    .replace(/\bcarbon CO₂\b/gi, "carbon dioxide")
+    .replace(/\bCO₂ dioxide\b/gi, "carbon dioxide")
+    .replace(/\bNADH₂\b/gi, "NADH")  // undo hallucination
+    .replace(/\bNADH2\b/gi, "NADH");
+
   // Run timing refinement
   return refineSrtTiming(cleanText.trim());
+};
+
+export const translateSrt = async (
+  srtContent: string,
+  targetLanguage: SupportedLanguage
+): Promise<string> => {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API Key is missing");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `Translate the following SRT file into: ${targetLanguage}
+
+Keep all timestamps, numbering, spacing, and scientific notation unchanged.
+
+SRT:
+${srtContent}`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    config: {
+      systemInstruction: TRANSLATION_SYSTEM_INSTRUCTION,
+      temperature: 0.1, // Very low temperature for strict formatting compliance
+    },
+    contents: prompt,
+  });
+
+  let translatedText = response.text || "";
+  translatedText = translatedText.replace(/^```srt\n/, '').replace(/^```\n/, '').replace(/^```/, '').replace(/```$/, '');
+
+  return translatedText.trim();
 };
