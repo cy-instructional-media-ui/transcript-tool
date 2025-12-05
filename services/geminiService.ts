@@ -51,51 +51,56 @@ const getApiKey = (): string => {
 };
 
 const BASE_SYSTEM_INSTRUCTION = `
-You are a strict, rule-based SRT formatting engine.
-Your goal is to maximize readability while minimizing screen obstruction.
+You are a deterministic SRT formatting engine. You follow rules, not preferences.
 
-**DO NOT CHANGE:**
-- Timestamp bucket boundaries (unless merging according to rules below).
-- Start times of the first word in a block.
-- Word order (except approved corrections).
-- The meaning of the text.
+**CRITICAL: Clean up the ending.**
+Transcripts often contain hallucinated or auto-generated garbage at the very end like "You.", "Subtitles by...", or single words that do not match the audio. REMOVE THESE.
 
-**LINE LENGTH RULES:**
-- **Target ≤ 50 characters per line.**
-- Max 2 lines per subtitle block.
-- **Prefer single-line subtitles whenever possible.**
-- Avoid tall, heavy blocks that obscure the video.
-- NEVER leave a single word (like "this", "our", "the") hanging on a second line if it can fit on the first line.
-
-**MERGING RULES (SMART CONDENSING):**
-You may merge two timestamp buckets (lines from input) into ONE subtitle block ONLY IF all of the following are true:
+====================
+MERGING RULES (STRICT)
+====================
+You MUST merge two consecutive timestamp buckets into ONE subtitle block when ALL conditions are true:
 1. The combined text is **50 characters or fewer**.
-2. Merging does NOT create more than 2 lines per subtitle block.
-3. The first line does NOT end with a hard stop (. ? !).
-4. The two lines clearly form a continuous phrase (not separate ideas).
-5. The result does not create large 2-line blocks that could obscure the screen.
+2. The merged block contains no more than 2 lines.
+3. The first bucket does NOT end in ".", "?", "!".
+4. The second bucket continues the same phrase (not a new idea).
+5. Merging does NOT create a tall block that obstructs the video.
 
-**WHEN TO MERGE:**
-Merge when the first line ends with a soft connector such as:
-- comma, semicolon, colon
-- "and", "but", "so", "or", "because", "then"
-- or any short connecting phrase that clearly continues the sentence.
+When these rules are met, merging is **REQUIRED**, not optional.
 
-**WHEN NOT TO MERGE:**
-- Do NOT merge if lines represent different ideas.
-- Do NOT merge if it creates a run-on sentence.
-- Do NOT merge if it exceeds 50 characters.
+====================
+WHEN NOT TO MERGE
+====================
+Do NOT merge when:
+- The merged text exceeds 50 characters.
+- The first bucket ends in ".", "?", or "!".
+- The two lines form separate ideas.
+- Merging creates more than 2 lines.
 
-**TIMING & SYNCHRONIZATION (CRITICAL):**
-- **Hard Anchors:** The start time of a subtitle block MUST MATCH the source timestamp of the first word in that block exactly.
-- **Interpolation:** If you split a text segment, interpolated start times must be sequential.
-- **Anti-Drift:** NEVER move text to an earlier timestamp to make a sentence "look correct". If the transcript says a word happens at 0:10, it cannot appear in a block starting at 0:05.
+====================
+LINE FORMAT RULES
+====================
+- **Max 2 lines per block.**
+- **Max 50 characters per line.**
+- Prefer ONE line whenever possible.
+- NEVER leave a trailing orphan word on its own line.
+- Split long lines according to natural phrase boundaries.
 
-**SRT Output Format:**
+====================
+TIMING RULES
+====================
+- **Start time of each block MUST match the first timestamp in the bucket.**
+- Do not move text to earlier timestamps, even if grammatically tempting.
+- Splitting creates new blocks with interpolated start times.
+
+====================
+OUTPUT
+====================
+Produce valid SRT blocks:
 1
-00:00:00,000 --> 00:00:04,000
-Line 1 text
-Line 2 text (optional)
+00:00:00,000 --> 00:00:02,000
+text line 1
+text line 2
 
 (Blank line between blocks)
 `;
@@ -321,7 +326,12 @@ export const generateSrt = async (
     ${approvedCorrections.map(c => `- Change "${c.original}" to "${c.correction}" near ${c.timestamp}`).join('\n')}`;
   }
 
-  prompt += `\n\nREMINDER: Target max 50 chars per line. Prefer single lines. Merge short phrases if they flow. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY (for the first word of the block).`;
+  // Strong reinforcement of the strict merging rules
+  prompt += `\n\n**CRITICAL INSTRUCTIONS:**
+  1. Apply the **strict merging rules** from the system instruction.
+  2. If two consecutive buckets meet the merge conditions (<=50 chars, flow together), you **MUST** merge them.
+  3. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY (for the first word of the block).`;
+  
   prompt += `\n\nTranscript:\n${text}`;
 
   const response = await ai.models.generateContent({
