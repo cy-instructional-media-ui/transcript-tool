@@ -57,14 +57,16 @@ You are a deterministic SRT formatting engine. You follow rules, not preferences
 Transcripts often contain hallucinated or auto-generated garbage at the very end like "You.", "Subtitles by...", or single words that do not match the audio. REMOVE THESE.
 
 ====================
-SCIENTIFIC NOTATION RULES
+SCIENTIFIC NOTATION RULES (DO NOT BREAK)
 ====================
-Whenever scientific names contain numbers that should be subscripts (e.g., CO2, H2O, FADH2, NADH2), convert them to proper Unicode subscripts:
-- CO₂
-- H₂O
-- FADH₂
-- NADH₂
-Do not modify meanings, only formatting.
+You MUST preserve correct biochemical notation:
+
+• NADH must ALWAYS remain exactly "NADH" (no subscripts).
+• FADH2 (from transcript) may be converted to proper Unicode "FADH₂".
+• CO2 (from transcript) may be converted to "CO₂".
+• H2O (from transcript) may be converted to "H₂O".
+• Do NOT add subscripts or superscripts to any other molecule unless the transcript explicitly contains them.
+• NEVER infer or guess chemical formulas. Only correct them if they are unambiguously standard notation.
 
 ====================
 MERGING RULES (STRICT)
@@ -356,6 +358,11 @@ export const generateSrt = async (
   let cleanText = response.text || "";
   cleanText = cleanText.replace(/^```srt\n/, '').replace(/^```\n/, '').replace(/^```/, '').replace(/```$/, '');
   
+  // Safety patch for hallucinated chemistry
+  cleanText = cleanText
+    .replace(/\bNADH₂\b/g, "NADH")  // undo hallucination
+    .replace(/\bNADH2\b/g, "NADH");
+
   // Run timing refinement
   return refineSrtTiming(cleanText.trim());
 };
