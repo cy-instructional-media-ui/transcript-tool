@@ -1,3 +1,4 @@
+
 export enum AppStage {
   INPUT = 'INPUT',
   OPTIONS = 'OPTIONS',
@@ -13,6 +14,30 @@ export enum CorrectionMode {
   SPELLING = 'SPELLING',
   BOTH = 'BOTH'
 }
+
+export type SupportedLanguage = 
+  | 'English' 
+  | 'Spanish' 
+  | 'Chinese (Simplified)' 
+  | 'Chinese (Traditional)' 
+  | 'Tagalog (Filipino)' 
+  | 'Korean' 
+  | 'Armenian' 
+  | 'Vietnamese' 
+  | 'Farsi (Persian)' 
+  | 'Japanese';
+
+export const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
+  'Spanish',
+  'Chinese (Simplified)',
+  'Chinese (Traditional)',
+  'Tagalog (Filipino)',
+  'Korean',
+  'Armenian',
+  'Vietnamese',
+  'Farsi (Persian)',
+  'Japanese'
+];
 
 export interface SpellingCorrection {
   id: string;
