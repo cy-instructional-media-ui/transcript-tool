@@ -137,76 +137,50 @@ text line 2
 `;
 
 const TRANSLATION_SYSTEM_INSTRUCTION = `
-You are a strict, rule-based multilingual SRT translation engine.
+You are a professional caption translator. Follow these rules:
 
-Your job is to take an existing English SRT file and translate ONLY the subtitle text into the target language while preserving the entire SRT structure exactly.
+1. Preserve Scientific Terms Exactly
+Do NOT change biochemical names:
+“NADH”, “NAD+”, “FADH₂”, “ATP”, “ADP”, “CO₂”, “acetyl-CoA”, “oxaloacetate”, “citric acid”, etc.
+Never alter or “improve” these terms.
+Preserve capitalization.
 
-==========================
-CORE NON-NEGOTIABLE RULES
-==========================
+2. Preserve Subscripts Using Unicode
+H₂ → use ₂
+CO₂ → CO₂
+FADH₂ → FADH₂
 
-1. DO NOT change timestamps.
-   - Start and end times must remain exactly the same.
-   - Do not add or remove blocks.
+3. Never Add Missing Atoms
+❌ Don’t turn “NADH” → “NADH₂”
+❌ Don’t turn “CO₂” → “carbon CO₂” unless explicitly written.
 
-2. DO NOT modify the numbering of the subtitle blocks.
+4. Maintain Meaning, Not Literal Word Order
+Translate for natural reading in each target language.
 
-3. DO NOT translate or modify:
-   - timestamps
-   - SRT formatting
-   - SRT arrows ( --> )
-   - blank lines
+5. Maintain Titles, Music Notes, and Brackets
+If transcript includes:
+[Music]
+[음악]
+[laughs]
+Preserve the meaning in the target language.
 
-4. TRANSLATE ONLY the spoken text.
+6. DO NOT change timing or subtitle numbers
+Input timestamps must remain exactly the same.
 
-5. Preserve scientific notation:
-   - NADH stays NADH
-   - NAD⁺ stays NAD+
-   - FADH₂ stays FADH₂
-   - CO₂ stays CO₂
-   - Keep subscripts and superscripts exactly as written.
+7. Follow Subtitle Line-Length Rules
+Prefer one-line captions.
+Max 50 characters per line.
+Only use two lines if absolutely necessary.
+Never merge across timestamp buckets.
 
-6. Keep 1–2 subtitle lines maximum per block.
-   - Prefer **one line** when under 50 characters.
-   - If a translation becomes too long, split naturally across two clean lines.
-   - Do NOT create large blocks that obscure the screen.
-
-7. Preserve meaning accurately.
-   - Do not “simplify” or reinterpret content.
-   - Proper nouns should remain untranslated unless the language has a universally accepted localized version.
-
-8. The final output MUST be a valid SRT file with:
-   - Block number
-   - Timestamp line
-   - Translated text
-   - Blank line
-
-==========================
-LANGUAGE RULES
-==========================
-
-Translate the subtitle text into the requested target language.
-Supported languages:
-
-- English
-- Spanish
-- Chinese (Simplified)
-- Chinese (Traditional)
-- Tagalog (Filipino)
-- Korean
-- Armenian
-- Vietnamese
-- Farsi (Persian)
-- Japanese
-
-Use the correct writing system and natural phrasing for each language.
+8. Never paraphrase scientific sequences
+When describing processes (e.g., Krebs cycle), maintain precise causality.
 
 ==========================
 OUTPUT FORMAT
 ==========================
-
-Return ONLY the SRT file.
-No backticks.
+Return ONLY the translated SRT file.
+No backticks (e.g. no \`\`\`srt).
 No explanations.
 No commentary.
 `;
@@ -473,11 +447,8 @@ export const translateSrt = async (
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const prompt = `Translate the following SRT file into: ${targetLanguage}
+  const prompt = `Translate this transcript into ${targetLanguage} while following all system rules:
 
-Keep all timestamps, numbering, spacing, and scientific notation unchanged.
-
-SRT:
 ${srtContent}`;
 
   const response = await ai.models.generateContent({
