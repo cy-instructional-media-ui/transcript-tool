@@ -365,7 +365,8 @@ export const generateSrt = async (
 Merge lines ONLY when the merged line is 50 characters or fewer.
 Do not create tall two-line blocks unless absolutely necessary.
 Never move text between timestamp buckets.
- Split blocks if necessary. START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY. DO NOT MOVE TEXT BETWEEN TIMESTAMP BUCKETS.`;
+ START TIMES MUST MATCH SOURCE TIMESTAMPS EXACTLY. Preserve bucket boundaries. 
+Follow the system instruction for line merging and splitting.`;
   prompt += `\n\nTranscript:\n${text}`;
 
   const response = await ai.models.generateContent({
