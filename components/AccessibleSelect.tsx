@@ -1,161 +1,79 @@
-import React, { useState, useRef, useEffect } from "react";
+import * as Select from "@radix-ui/react-select";
+import { CheckIcon, ChevronDownIcon } from "@radix-ui/react-icons";
+import React from "react";
 
-interface Option {
+interface Props {
+  id: string;
   label: string;
   value: string;
-}
-
-interface AccessibleSelectProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Option[];
+  onChange: (v: string) => void;
+  options: string[];
   disabled?: boolean;
 }
 
-export default function AccessibleSelect({
+const AccessibleSelect: React.FC<Props> = ({
+  id,
   label,
   value,
   onChange,
   options,
-  disabled = false,
-}: AccessibleSelectProps) {
-  const [open, setOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-
-  const selectedOption = options.find((o) => o.value === value);
-
-  // Close on outside click
-  useEffect(() => {
-    function handleOutside(e: MouseEvent) {
-      if (
-        !buttonRef.current?.contains(e.target as Node) &&
-        !listRef.current?.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, []);
-
-  // Handle keyboard interactions
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (!open) {
-      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
-        e.preventDefault();
-        setOpen(true);
-        setActiveIndex(0);
-      }
-      return;
-    }
-
-    switch (e.key) {
-      case "Escape":
-        setOpen(false);
-        buttonRef.current?.focus();
-        break;
-      case "Tab":
-        // REQUIRED by ADA Title II — close menu before tabbing out
-        setOpen(false);
-        break;
-      case "ArrowDown":
-        e.preventDefault();
-        setActiveIndex((i) =>
-          i === null || i === options.length - 1 ? 0 : i + 1
-        );
-        break;
-      case "ArrowUp":
-        e.preventDefault();
-        setActiveIndex((i) =>
-          i === null || i === 0 ? options.length - 1 : i - 1
-        );
-        break;
-      case "Enter":
-      case " ":
-        e.preventDefault();
-        if (activeIndex !== null) {
-          onChange(options[activeIndex].value);
-          setOpen(false);
-          buttonRef.current?.focus();
-        }
-        break;
-      case "Home":
-        setActiveIndex(0);
-        break;
-      case "End":
-        setActiveIndex(options.length - 1);
-        break;
-    }
-  }
-
-  // Scroll active item into view
-  useEffect(() => {
-    if (activeIndex === null) return;
-    const el = listRef.current?.children[activeIndex] as HTMLElement;
-    el?.scrollIntoView({ block: "nearest" });
-  }, [activeIndex]);
-
+  disabled,
+}) => {
   return (
-    <div className="w-full">
-      <label className="block mb-1 text-sm font-medium text-gray-800">
+    <div>
+      <label htmlFor={id} className="sr-only">
         {label}
       </label>
 
-      <div className="relative">
-        <button
-          ref={buttonRef}
-          type="button"
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          aria-controls="accessible-listbox"
-          onClick={() => setOpen((o) => !o)}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          className="w-full bg-white border border-gray-400 px-3 py-2 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+      <Select.Root value={value} onValueChange={onChange} disabled={disabled}>
+        <Select.Trigger
+          id={id}
+          aria-label={label}
+          className="
+            w-full p-2.5 bg-white border border-gray-300 rounded-lg
+            flex items-center justify-between text-gray-900 text-sm
+            focus:outline-none focus:ring-2 focus:ring-blue-500
+          "
         >
-          {selectedOption?.label}
-        </button>
+          {/* THIS is what shows the selected option */}
+          <Select.Value />
+          <Select.Icon>
+            <ChevronDownIcon />
+          </Select.Icon>
+        </Select.Trigger>
 
-        {open && (
-          <ul
-            id="accessible-listbox"
-            ref={listRef}
-            role="listbox"
-            tabIndex={-1}
-            className="absolute z-20 mt-1 w-full max-h-60 overflow-auto bg-white border border-gray-300 rounded-lg shadow-lg"
-            onKeyDown={handleKeyDown}
+        <Select.Portal>
+          <Select.Content
+            className="
+              bg-white border border-gray-300 rounded-lg shadow-lg
+              max-h-60 overflow-y-auto z-50
+            "
           >
-            {options.map((opt, index) => (
-              <li
-                key={opt.value}
-                role="option"
-                aria-selected={opt.value === value}
-                className={`px-3 py-2 cursor-pointer
-                  ${
-                    index === activeIndex
-                      ? "bg-blue-600 text-white"
-                      : opt.value === value
-                      ? "bg-blue-50"
-                      : "hover:bg-gray-100"
-                  }
-                `}
-                onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                  buttonRef.current?.focus();
-                }}
-              >
-                {opt.label}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+            <Select.Viewport className="p-2">
+              {options.map((opt) => (
+                <Select.Item
+                  value={opt}
+                  key={opt}
+                  className="
+                    text-sm text-gray-800 rounded-md p-2 cursor-pointer
+                    focus:bg-blue-100 focus:outline-none
+                    data-[state=checked]:bg-blue-200
+                  "
+                >
+                  {/* THIS is what makes the visible text appear */}
+                  <Select.ItemText>{opt}</Select.ItemText>
+
+                  <Select.ItemIndicator className="absolute right-2 inline-flex items-center">
+                    <CheckIcon />
+                  </Select.ItemIndicator>
+                </Select.Item>
+              ))}
+            </Select.Viewport>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
     </div>
   );
-}
+};
+
+export default AccessibleSelect;
