@@ -44,6 +44,7 @@ const AccessibleSelect: React.FC<Props> = ({
 
         <Select.Portal>
           <Select.Content
+            position="popper"
             className="
               bg-white border border-gray-300 rounded-lg shadow-lg
               max-h-60 overflow-y-auto z-50
