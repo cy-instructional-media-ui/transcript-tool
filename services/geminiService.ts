@@ -371,6 +371,25 @@ const refineSrtTiming = (srt: string): string => {
   return output.trim();
 };
 
+// services/geminiService.ts
+
+// Normalizes timestamps to HH:MM:SS,mmm format
+export function normalizeTimestamps(srt: string): string {
+  return srt
+    .replace(
+      /(\d{2}):(\d{2}):(\d{2})[.,](\d{1,3})/g,
+      (_, h, m, s, ms) => {
+        const milliseconds = ms.padStart(3, "0");
+        return `${h}:${m}:${s},${milliseconds}`;
+      }
+    )
+    .replace(
+      /(\d{2}):(\d{2}):(\d{2})(\d{3})/g,
+      (_, h, m, s, ms) => `${h}:${m}:${s},${ms}`
+    );
+}
+
+
 export const generateSrt = async (
   text: string, 
   mode: CorrectionMode,
@@ -465,3 +484,4 @@ ${srtContent}`;
 
   return translatedText.trim();
 };
+
