@@ -48,6 +48,17 @@ const AccessibleSelect: React.FC<Props> = ({
               bg-white border border-gray-300 rounded-lg shadow-lg
               max-h-60 overflow-y-auto z-50
             "
+            onKeyDown={(e) => {
+              if (e.key === "Tab") {
+                e.preventDefault();
+                const trigger = document.getElementById(id);
+                trigger?.focus();
+
+                // Close via synthetic Escape
+                const evt = new KeyboardEvent("keydown", { key: "Escape" });
+                trigger?.dispatchEvent(evt);
+              }
+            }}
           >
             <Select.Viewport className="p-2">
               {options.map((opt) => (
