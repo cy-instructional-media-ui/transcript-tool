@@ -389,6 +389,53 @@ export function normalizeTimestamps(srt: string): string {
     );
 }
 
+// Splits raw transcript into safe, non-breaking chunks for Gemini.
+// Each chunk ~6K chars (well under token limits).
+export function chunkTranscript(text: string, maxLen = 6000): string[] {
+  const chunks: string[] = [];
+  let current = "";
+
+  const lines = text.split("\n");
+
+  for (const line of lines) {
+    // If adding this line would exceed limit, finalize current chunk
+    if ((current + "\n" + line).length > maxLen) {
+      chunks.push(current.trim());
+      current = line;
+    } else {
+      current += "\n" + line;
+    }
+  }
+
+  if (current.trim().length > 0) {
+    chunks.push(current.trim());
+  }
+
+  return chunks;
+}
+
+// Merges multiple SRT files (from chunks) into one continuous SRT
+export function mergeSrtChunks(srts: string[]): string {
+  let merged = "";
+  let indexOffset = 0;
+
+  for (const srt of srts) {
+    const blocks = srt.trim().split(/\n\s*\n/);
+
+    for (const block of blocks) {
+      const lines = block.split("\n");
+      if (lines.length < 2) continue;
+
+      const timeLine = lines[1];
+      const text = lines.slice(2).join("\n");
+
+      merged += `${indexOffset + 1}\n${timeLine}\n${text}\n\n`;
+      indexOffset++;
+    }
+  }
+
+  return merged.trim();
+}
 
 export const generateSrt = async (
   text: string, 
@@ -456,6 +503,28 @@ export const generateSrt = async (
   // Run timing refinement
   return refineSrtTiming(cleanText.trim());
 };
+
+// High-level function: handles chunking and merging for long transcripts
+export async function generateFullSrt(
+  fullTranscript: string,
+  mode: CorrectionMode,
+  approvedCorrections: SpellingCorrection[] = []
+): Promise<string> {
+  const chunks = chunkTranscript(fullTranscript);
+
+  const results: string[] = [];
+
+  for (const chunk of chunks) {
+    const srt = await generateSrt(chunk, mode, approvedCorrections);
+    const fixed = normalizeTimestamps(srt);
+    results.push(fixed);
+  }
+
+  // Merge all partial SRTs
+  const merged = mergeSrtChunks(results);
+
+  return merged;
+}
 
 export const translateSrt = async (
   srtContent: string,
