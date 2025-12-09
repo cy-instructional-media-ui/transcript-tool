@@ -35,6 +35,7 @@ const StageInput: React.FC<Props> = ({ onNext, isValidating }) => {
 
           <p className="mt-2 text-xs text-blue-700 italic border-t border-blue-200 pt-2">
             Note: We cannot accept YouTube URLs directly due to YouTube's privacy and security settings.
+            <br>For best results, please avoid pasting transcripts longer than 5 minutes at this time. Longer transcripts may cause timing drift or formatting errors in the generated SRT file. We’re actively working on a fix.</br>
           </p>
         </div>
       </div>
