@@ -24,6 +24,7 @@ export default async function handler(
 
     const selectedModel = model || "gemini-2.5-flash";
 
+    // Ensure valid Gemini contents format
     const formattedContents = Array.isArray(contents)
       ? contents
       : [
@@ -33,9 +34,16 @@ export default async function handler(
           },
         ];
 
-    // Map SDK-style config → REST API format
-    const generationConfig = config?.temperature !== undefined
-      ? { temperature: config.temperature }
+    // Properly map SDK-style config to REST format
+    const generationConfig = config
+      ? {
+          ...(config.temperature !== undefined && {
+            temperature: config.temperature,
+          }),
+          ...(config.responseMimeType && {
+            responseMimeType: config.responseMimeType,
+          }),
+        }
       : undefined;
 
     const systemInstruction = config?.systemInstruction
@@ -51,7 +59,7 @@ export default async function handler(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Goog-Api-Key": process.env.GEMINI_API_KEY,
+          "X-Goog-Api-Key": process.env.GEMINI_API_KEY as string,
         },
         body: JSON.stringify({
           contents: formattedContents,
