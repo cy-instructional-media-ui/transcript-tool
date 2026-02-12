@@ -63,6 +63,8 @@ const App: React.FC = () => {
   
   const [proposedCorrections, setProposedCorrections] = useState<SpellingCorrection[]>([]);
 
+  const MAX_TRANSCRIPT_CHARS = 20000;
+
   const handleTranscriptSubmit = useCallback(async (text: string) => {
     if (!checkLocalDailyLimit()) {
       setError({
@@ -73,10 +75,22 @@ const App: React.FC = () => {
       return;
     }
 
+    // 🔒 Hard 10-minute transcript limit (20,000 characters)
+    if (text.trim().length > MAX_TRANSCRIPT_CHARS) {
+      setError({
+        message: "Transcript exceeds 10 minute limit (20,000 characters). Please shorten the transcript and try again.",
+        isTimestampError: false
+      });
+      setStage(AppStage.ERROR);
+      return;
+    }
+
     setIsValidating(true);
     setError(null);
+
     try {
       const hasTimestamps = await validateTimestamps(text);
+
       if (hasTimestamps) {
         setTranscript(text);
         setStage(AppStage.OPTIONS);
@@ -87,6 +101,7 @@ const App: React.FC = () => {
         });
         setStage(AppStage.ERROR);
       }
+
     } catch (e) {
       console.error(e);
       setError({
@@ -98,6 +113,7 @@ const App: React.FC = () => {
       setIsValidating(false);
     }
   }, []);
+
 
   const handleOptionSelect = useCallback(async (mode: CorrectionMode) => {
     setError(null);
