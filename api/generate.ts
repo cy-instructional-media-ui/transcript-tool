@@ -24,6 +24,16 @@ export default async function handler(
 
     const selectedModel = model || "gemini-2.5-flash";
 
+    // Ensure contents is in valid Gemini format
+    const formattedContents = Array.isArray(contents)
+      ? contents
+      : [
+          {
+            role: "user",
+            parts: [{ text: contents }],
+          },
+        ];
+
     const googleResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`,
       {
@@ -33,7 +43,7 @@ export default async function handler(
           "X-Goog-Api-Key": process.env.GEMINI_API_KEY,
         },
         body: JSON.stringify({
-          contents,
+          contents: formattedContents,
           ...(config ? { config } : {}),
         }),
       }
