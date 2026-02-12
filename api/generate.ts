@@ -4,8 +4,6 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
-  console.log("ENV KEY EXISTS:", !!process.env.GEMINI_API_KEY);
-
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -22,6 +20,16 @@ export default async function handler(
       return res.status(400).json({ error: "Missing contents payload" });
     }
 
+    // Hard 10-minute transcript ceiling (~20,000 characters)
+    const MAX_CHARS = 20000;
+
+    if (typeof contents === "string" && contents.length > MAX_CHARS) {
+      return res.status(413).json({
+        error:
+          "Transcript too long. Maximum supported length is 10 minutes (~20,000 characters).",
+      });
+    }
+
     const selectedModel = model || "gemini-2.5-flash";
 
     // Ensure valid Gemini contents format
@@ -34,7 +42,7 @@ export default async function handler(
           },
         ];
 
-    // Properly map SDK-style config to REST format
+    // Map SDK-style config to REST API format
     const generationConfig = config
       ? {
           ...(config.temperature !== undefined && {
