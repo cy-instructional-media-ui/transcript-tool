@@ -1,42 +1,39 @@
-
 export enum AppStage {
-  INPUT = 'INPUT',
-  OPTIONS = 'OPTIONS',
-  SPELLING_REVIEW = 'SPELLING_REVIEW',
-  PROCESSING = 'PROCESSING',
-  RESULT = 'RESULT',
-  ERROR = 'ERROR'
+  INPUT = "INPUT",
+  OPTIONS = "OPTIONS",
+  SPELLING_REVIEW = "SPELLING_REVIEW",
+  PROCESSING = "PROCESSING",
+  RESULT = "RESULT",
+  ERROR = "ERROR",
 }
 
 export enum CorrectionMode {
-  NONE = 'NONE',
-  PUNCTUATION = 'PUNCTUATION',
-  SPELLING = 'SPELLING',
-  BOTH = 'BOTH'
+  NONE = "NONE",
+  CLEAN = "CLEAN",
 }
 
-export type SupportedLanguage = 
-  | 'English' 
-  | 'Spanish' 
-  | 'Chinese (Simplified)' 
-  | 'Chinese (Traditional)' 
-  | 'Tagalog (Filipino)' 
-  | 'Korean' 
-  | 'Armenian' 
-  | 'Vietnamese' 
-  | 'Farsi (Persian)' 
-  | 'Japanese';
+export type SupportedLanguage =
+  | "English"
+  | "Spanish"
+  | "Chinese (Simplified)"
+  | "Chinese (Traditional)"
+  | "Tagalog (Filipino)"
+  | "Korean"
+  | "Armenian"
+  | "Vietnamese"
+  | "Farsi (Persian)"
+  | "Japanese";
 
 export const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
-  'Spanish',
-  'Chinese (Simplified)',
-  'Chinese (Traditional)',
-  'Tagalog (Filipino)',
-  'Korean',
-  'Armenian',
-  'Vietnamese',
-  'Farsi (Persian)',
-  'Japanese'
+  "Spanish",
+  "Chinese (Simplified)",
+  "Chinese (Traditional)",
+  "Tagalog (Filipino)",
+  "Korean",
+  "Armenian",
+  "Vietnamese",
+  "Farsi (Persian)",
+  "Japanese",
 ];
 
 export interface SpellingCorrection {

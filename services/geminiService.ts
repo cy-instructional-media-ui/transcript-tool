@@ -3,7 +3,7 @@ import { CorrectionMode, SpellingCorrection, SupportedLanguage } from "../types"
 const MODEL_NAME = "gemini-2.5-flash";
 
 /* ================================
-   SYSTEM INSTRUCTIONS (UNCHANGED)
+   SYSTEM INSTRUCTIONS
 ================================ */
 
 const BASE_SYSTEM_INSTRUCTION = `
@@ -80,6 +80,23 @@ TIMING RULES
 - Splitting creates new blocks with interpolated start times.
 
 ====================
+CAPITALIZATION RULES
+====================
+- The **first word of every subtitle block** MUST be capitalized.
+- Do NOT change the capitalization of any other word in the block.
+- This applies even when the source transcript is all-lowercase.
+
+====================
+MUSIC / BRACKET BOUNDARY RULES
+====================
+- [Music] and other bracketed cues (e.g. [Applause]) are their own isolated block.
+- NEVER merge a speech line into a [Music] block or vice versa.
+- If a sentence is interrupted by [Music], keep the speech BEFORE [Music] in its own block
+  and any speech that resumes AFTER [Music] in its own separate block.
+- The word immediately following a [Music] block starts a NEW subtitle block —
+  do NOT attach it to the end of the [Music] block.
+
+====================
 OUTPUT
 ====================
 Produce valid SRT blocks:
@@ -96,8 +113,8 @@ You are a professional caption translator. Follow these rules:
 
 1. Preserve Scientific Terms Exactly
 Do NOT change biochemical names:
-“NADH”, “NAD+”, “FADH₂”, “ATP”, “ADP”, “CO₂”, “acetyl-CoA”, “oxaloacetate”, “citric acid”, etc.
-Never alter or “improve” these terms.
+"NADH", "NAD+", "FADH₂", "ATP", "ADP", "CO₂", "acetyl-CoA", "oxaloacetate", "citric acid", etc.
+Never alter or "improve" these terms.
 Preserve capitalization.
 
 2. Preserve Subscripts Using Unicode
@@ -106,8 +123,8 @@ CO₂ → CO₂
 FADH₂ → FADH₂
 
 3. Never Add Missing Atoms
-❌ Don’t turn “NADH” → “NADH₂”
-❌ Don’t turn “CO₂” → “carbon CO₂” unless explicitly written.
+❌ Don't turn "NADH" → "NADH₂"
+❌ Don't turn "CO₂" → "carbon CO₂" unless explicitly written.
 
 4. Maintain Meaning, Not Literal Word Order
 Translate for natural reading in each target language.
@@ -139,7 +156,6 @@ No backticks (e.g. no \`\`\`srt).
 No explanations.
 No commentary.
 `;
-
 
 /* ================================
    HELPER: Gemini Proxy Call
@@ -201,11 +217,17 @@ ${text.substring(0, 1000)}... (truncated)`,
    Spelling Corrections
 ================================ */
 
-export const proposeCorrections = async (
-  text: string
-): Promise<SpellingCorrection[]> => {
+export const proposeCorrections = async (text: string): Promise<SpellingCorrection[]> => {
   const prompt = `
-Analyze this transcript for TRANSCRIPTION ERRORS (Spelling, Homophones, and Misheard Words).
+Analyze this transcript for clear spelling mistakes only.
+
+CRITICAL:
+- Do NOT suggest grammar improvements.
+- Do NOT rephrase spoken language.
+- Do NOT fix informal speech.
+- Only flag obvious typos that are clearly incorrect words.
+- If uncertain, do NOT suggest a correction.
+
 Return a JSON array with objects:
 { original, correction, context, timestamp }
 
@@ -217,16 +239,24 @@ ${text}
     const result = await callGemini({
       contents: prompt,
       config: {
-        temperature: 0.1,
+        temperature: 0.0,
         responseMimeType: "application/json",
       },
     });
 
-    const raw = JSON.parse(
-      result.candidates?.[0]?.content?.parts?.[0]?.text || "[]"
-    );
+    const raw = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "[]");
 
-    return raw.map((c: any, index: number) => ({
+    const filtered = raw.filter((c: any) => {
+      if (!c.original || !c.correction) return false;
+
+      // Only allow simple spelling fixes (small edit distance)
+      const distance = Math.abs(c.original.length - c.correction.length);
+      if (distance > 3) return false;
+
+      return true;
+    });
+
+    return filtered.map((c: any, index: number) => ({
       ...c,
       id: `corr-${index}`,
       isSelected: true,
@@ -246,7 +276,41 @@ export const generateSrt = async (
   mode: CorrectionMode,
   approvedCorrections: SpellingCorrection[] = []
 ): Promise<string> => {
-  let prompt = `Convert the following transcript into a valid SRT file.\n\n${text}`;
+  let prompt = "";
+
+  if (mode === CorrectionMode.NONE) {
+    prompt = `Convert the following transcript into a valid SRT file.
+
+CRITICAL RULES:
+- Preserve spoken wording exactly as written.
+- Do NOT change punctuation.
+- Do NOT rephrase sentences.
+- Only format into valid SRT structure.
+- Only adjust line breaks and merging for readability.
+- Do NOT alter timestamps.
+- Capitalize the first word of every subtitle block (see system instructions).
+
+Transcript:
+${text}`;
+  } else {
+    prompt = `Convert the following transcript into a valid SRT file.
+
+CRITICAL RULES:
+- Preserve spoken wording exactly as written.
+- Do NOT rephrase sentences.
+- Do NOT rewrite wording.
+- Do NOT change meaning.
+- You MAY add missing terminal punctuation (., ?, !).
+- You MAY add minimal commas only when clearly needed.
+- Do NOT improve grammar beyond punctuation.
+- Only format into valid SRT structure.
+- Only adjust line breaks and merging for readability.
+- Do NOT alter timestamps.
+- Capitalize the first word of every subtitle block (see system instructions).
+
+Transcript:
+${text}`;
+  }
 
   const result = await callGemini({
     contents: prompt,
@@ -256,8 +320,7 @@ export const generateSrt = async (
     },
   });
 
-  let cleanText =
-    result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  let cleanText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
   cleanText = cleanText
     .replace(/^```srt\n/, "")
@@ -265,7 +328,8 @@ export const generateSrt = async (
     .replace(/^```/, "")
     .replace(/```$/, "");
 
-  return cleanText.trim();
+  const normalized = normalizeSrtTiming(cleanText.trim());
+  return normalized;
 };
 
 /* ================================
@@ -288,8 +352,7 @@ ${srtContent}`;
     },
   });
 
-  let translated =
-    result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  let translated = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
   translated = translated
     .replace(/^```srt\n/, "")
@@ -298,4 +361,186 @@ ${srtContent}`;
     .replace(/```$/, "");
 
   return translated.trim();
+};
+
+/* ================================
+   Deterministic Timing Normalization
+================================ */
+
+type SrtBlock = {
+  index: number;
+  start: number;
+  end: number;
+  text: string[];
+};
+
+const parseTime = (time: string): number => {
+  const [hms, msPart] = time.split(",");
+  const parts = hms.split(":").map(Number);
+
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+
+  if (parts.length === 3) {
+    hours = parts[0];
+    minutes = parts[1];
+    seconds = parts[2];
+  } else if (parts.length === 2) {
+    minutes = parts[0];
+    seconds = parts[1];
+  } else {
+    return 0;
+  }
+
+  const ms = parseInt(msPart || "0", 10);
+
+  return hours * 3600 + minutes * 60 + seconds + ms / 1000;
+};
+
+const formatTime = (totalSeconds: number): string => {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  const ms = Math.floor((totalSeconds - Math.floor(totalSeconds)) * 1000);
+
+  return (
+    String(h).padStart(2, "0") +
+    ":" +
+    String(m).padStart(2, "0") +
+    ":" +
+    String(s).padStart(2, "0") +
+    "," +
+    String(ms).padStart(3, "0")
+  );
+};
+
+const parseSrt = (srt: string): SrtBlock[] => {
+  const blocks = srt.split(/\n\s*\n/);
+  const parsed: SrtBlock[] = [];
+
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    if (lines.length < 3) continue;
+
+    const index = parseInt(lines[0]);
+    const [startStr, endStr] = lines[1].split(" --> ");
+
+    parsed.push({
+      index,
+      start: parseTime(startStr),
+      end: parseTime(endStr),
+      text: lines.slice(2),
+    });
+  }
+
+  return parsed;
+};
+
+const normalizeSrtTiming = (srt: string): string => {
+  const MIN_DURATION = 2.0;
+  const MAX_CPS = 15;
+
+  const blocks = parseSrt(srt);
+
+  // ===============================
+  // Aggressive Forward Merge Pass
+  // ===============================
+  for (let i = 0; i < blocks.length - 1; i++) {
+    const current = blocks[i];
+    const next = blocks[i + 1];
+
+    const currentText = current.text.join(" ").trim();
+    const nextText = next.text.join(" ").trim();
+    const currentIsBracket = /^\[.*\]$/.test(currentText);
+    const nextIsBracket = /^\[.*\]$/.test(nextText);
+
+    // Never merge across bracket boundaries in either direction
+    if (currentIsBracket || nextIsBracket) {
+      continue;
+    }
+
+    const endsWithPunctuation = /[.?!]$/.test(currentText);
+
+    const combinedText = currentText + " " + nextText;
+    const combinedDuration = next.end - current.start;
+    const combinedCps = combinedText.length / combinedDuration;
+
+    const MAX_COMBINED_CHARS = 90;
+    const MAX_MERGE_CPS = 17;
+
+    if (
+      !endsWithPunctuation &&
+      combinedText.length <= MAX_COMBINED_CHARS &&
+      combinedCps <= MAX_MERGE_CPS
+    ) {
+      current.text = [combinedText];
+      current.end = next.end;
+
+      blocks.splice(i + 1, 1);
+      i--;
+    }
+  }
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+
+    const text = block.text.join(" ");
+    const isBracketed = /^\[.*\]$/.test(text.trim());
+    if (isBracketed) {
+      continue;
+    }
+
+    const charCount = text.length;
+    const duration = block.end - block.start;
+
+    // Merge micro blocks forward (but never into a bracket block)
+    if (duration < 1.2 && i < blocks.length - 1) {
+      const next = blocks[i + 1];
+      const nextText = next.text.join(" ").trim();
+      const nextIsBracket = /^\[.*\]$/.test(nextText);
+
+      if (!nextIsBracket) {
+        block.text = [block.text.join(" ") + " " + next.text.join(" ")];
+        block.end = next.end;
+        blocks.splice(i + 1, 1);
+        i--;
+        continue;
+      }
+    }
+
+    let newDuration = duration;
+
+    if (duration < MIN_DURATION) {
+      newDuration = MIN_DURATION;
+    }
+
+    const cps = charCount / newDuration;
+    if (cps > MAX_CPS) {
+      newDuration = charCount / MAX_CPS;
+    }
+
+    block.end = block.start + newDuration;
+
+    if (i < blocks.length - 1) {
+      const next = blocks[i + 1];
+      const gap = next.start - block.end;
+
+      if (gap > 0 && gap < 1.5) {
+        block.end = next.start;
+      }
+
+      if (block.end > next.start) {
+        block.end = next.start;
+      }
+    }
+  }
+
+  return blocks
+    .map((b, idx) => {
+      return (
+        idx + 1 + "\n" + formatTime(b.start) + " --> " + formatTime(b.end) + "\n" + b.text.join(" ")
+      );
+    })
+    .join("\n\n");
 };
