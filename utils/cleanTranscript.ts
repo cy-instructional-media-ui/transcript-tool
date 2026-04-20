@@ -1,93 +1,110 @@
 /**
- * cleanTranscript.ts
+ * cleanTranscript.ts — FINAL
  *
- * Pre-processes a raw YouTube transcript before sending to Gemini.
- * Removes chapter headings, orphaned timestamps, and other YouTube
- * artifacts that are not spoken words.
+ * Normalizes YouTube transcript text before it reaches Gemini.
+ *
+ * YouTube transcripts use several timestamp formats depending on the
+ * transcript panel UI and copy method:
+ *
+ *   "0:22"          →  22 seconds        (M:SS)
+ *   "1:06"          →  1 min 6 sec       (M:SS)
+ *   "1:02:45"       →  1 hr 2 min 45 sec (H:MM:SS)
+ *   "0:22\n text"   →  timestamp on its own line
+ *   "0:022 seconds" →  the "seconds" label variant (some locales)
+ *
+ * The critical bug this fixes: "0:22" must be read as M:SS (= 00:00:22),
+ * NOT as minutes:milliseconds. Previously the SRT generator was treating
+ * the second segment as milliseconds, compressing the entire video into
+ * the first few seconds.
  */
+
+// Matches YouTube transcript chapter headings like "Chapter 2: Glycolysis"
+const CHAPTER_RE = /^Chapter\s+\d+[:\s].*/i;
+
+// Matches YouTube's "X seconds" / "X minutes, Y seconds" label lines
+const LABEL_RE = /^\d+\s+(second|minute|hour)/i;
+
+// Matches inline timestamp formats: "0:22", "1:06", "1:02:45"
+// Optionally followed by junk like " seconds" or " secondsas"
+const INLINE_TS_RE = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(?:seconds?.*)?$/i;
 
 /**
- * Returns true if a line looks like a YouTube timestamp (e.g. "0:11", "1:08", "1:23:45")
+ * Convert a YouTube M:SS or H:MM:SS timestamp string into HH:MM:SS,000
+ * so the SRT generator receives an unambiguous format.
  */
-const isTimestamp = (line: string): boolean =>
-  /^\d{1,2}:\d{2}(:\d{2})?$/.test(line.trim());
+const normalizeTimestamp = (raw: string): string => {
+  const match = raw.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return raw;
 
-/**
- * Returns true if a line looks like a YouTube chapter heading —
- * i.e. plain text that is NOT preceded by a timestamp in the transcript.
- * We detect these as lines that appear directly after another non-timestamp,
- * non-speech line, or at the top level with title-case / no lowercase words.
- *
- * Strategy: a line is treated as a chapter heading if it:
- *   - Is not a timestamp
- *   - Is not empty
- *   - Does not follow a timestamp line (so it has no speech context)
- *   - Consists only of title-cased or all-caps words (typical of chapter labels)
- */
-const isChapterHeading = (line: string, prevLineWasTimestamp: boolean): boolean => {
-  const trimmed = line.trim();
-  if (!trimmed || isTimestamp(trimmed)) return false;
+  const [, a, b, c] = match;
 
-  // If the previous line was a timestamp, this is speech — not a heading
-  if (prevLineWasTimestamp) return false;
+  let h = 0, m = 0, s = 0;
 
-  // If it looks like all title-case words (each word starts with uppercase or is a number)
-  // e.g. "Compatibility Mode Conversion", "The problem", "File Save"
-  const words = trimmed.split(/\s+/);
-  const titleCaseRatio =
-    words.filter((w) => /^[A-Z0-9]/.test(w)).length / words.length;
+  if (c !== undefined) {
+    // H:MM:SS
+    h = parseInt(a ?? "0", 10);
+    m = parseInt(b ?? "0", 10);
+    s = parseInt(c, 10);
+  } else {
+    // M:SS
+    m = parseInt(a ?? "0", 10);
+    s = parseInt(b ?? "0", 10);
+  }
 
-  return titleCaseRatio >= 0.6;
+  const hh = String(h).padStart(2, "0");
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+
+  return `${hh}:${mm}:${ss},000`;
 };
 
 /**
- * Main export. Takes raw YouTube transcript text and returns a cleaned
- * version with chapter headings and artifacts removed.
+ * Main export. Cleans a raw YouTube transcript paste:
+ * - Removes chapter headings
+ * - Removes standalone label lines ("22 seconds", "1 minute, 6 seconds")
+ * - Normalizes inline timestamps from M:SS → HH:MM:SS,000
+ * - Strips leading/trailing whitespace per line
+ * - Collapses multiple blank lines
  */
 export const cleanTranscript = (raw: string): string => {
   const lines = raw.split("\n");
-  const output: string[] = [];
-  let prevLineWasTimestamp = false;
+  const cleaned: string[] = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (const line of lines) {
     const trimmed = line.trim();
 
-    // Always drop empty lines from consideration (we'll re-join cleanly)
-    if (!trimmed) {
-      prevLineWasTimestamp = false;
+    // Drop empty lines (we'll re-add controlled spacing)
+    if (!trimmed) continue;
+
+    // Drop chapter headings
+    if (CHAPTER_RE.test(trimmed)) continue;
+
+    // Drop standalone label lines ("22 seconds", "1 minute, 6 seconds")
+    if (LABEL_RE.test(trimmed)) continue;
+
+    // Normalize inline timestamps that appear at the start of a line.
+    // YouTube often pastes as: "0:22 text continues here"
+    // We split timestamp from text and normalize the timestamp portion.
+    const inlineMatch = trimmed.match(
+      /^(\d{1,2}:\d{2}(?::\d{2})?)\s*(?:seconds?\S*\s*)?(.*)/i
+    );
+
+    if (inlineMatch) {
+      const [, ts, rest] = inlineMatch;
+      const normalizedTs = normalizeTimestamp(ts ?? "");
+      const textPart = (rest ?? "").trim();
+
+      if (textPart) {
+        cleaned.push(`${normalizedTs} ${textPart}`);
+      } else {
+        cleaned.push(normalizedTs);
+      }
       continue;
     }
 
-    if (isTimestamp(trimmed)) {
-      // Look ahead: if the very next non-empty line is ALSO a timestamp,
-      // this timestamp is orphaned (no speech follows it before the next cue)
-      // — skip it to avoid Gemini seeing consecutive timestamps with no text.
-      let nextContentLine = "";
-      for (let j = i + 1; j < lines.length; j++) {
-        if (lines[j].trim()) {
-          nextContentLine = lines[j].trim();
-          break;
-        }
-      }
-
-      if (isTimestamp(nextContentLine)) {
-        // Orphaned timestamp — skip
-        prevLineWasTimestamp = false;
-        continue;
-      }
-
-      output.push(trimmed);
-      prevLineWasTimestamp = true;
-    } else if (isChapterHeading(trimmed, prevLineWasTimestamp)) {
-      // Chapter heading — drop it
-      prevLineWasTimestamp = false;
-    } else {
-      // Regular speech line
-      output.push(trimmed);
-      prevLineWasTimestamp = false;
-    }
+    // Plain text line — keep as-is
+    cleaned.push(trimmed);
   }
 
-  return output.join("\n");
+  return cleaned.join("\n");
 };
