@@ -389,13 +389,11 @@ const parseTime = (time: string): number => {
   const parts = hms.split(":").map(Number);
   const ms = parseInt(msPart || "0", 10);
 
-  if (parts.length === 3) {
-    const [h, m, s] = parts;
-    return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s ?? 0) + ms / 1000;
+if (parts.length === 3) {
+    return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0) + ms / 1000;
   }
   if (parts.length === 2) {
-    const [m, s] = parts;
-    return (m ?? 0) * 60 + (s ?? 0) + ms / 1000;
+    return (parts[0] ?? 0) * 60 + (parts[1] ?? 0) + ms / 1000;
   }
   return 0;
 };
