@@ -20,19 +20,13 @@ const StageInput: React.FC<Props> = ({ onNext, isValidating }) => {
       <div className="mb-6 text-center">
         <h2 id="input-heading" className="text-2xl font-bold text-gray-900 mb-2">Step 1: Paste Transcript</h2>
         <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-900 text-left mx-auto max-w-xl">
-          <p className="font-bold mb-2">Option 1: YouTube (Free & Built-in)</p>
+          <p className="font-bold mb-2">How to Copy/Paste YouTube Transcript</p>
           <ul className="list-disc pl-5 space-y-1 mb-4 text-blue-800">
             <li>Go to the YouTube video.</li>
             <li>Click <strong>...More</strong> (or description) → <strong>Show transcript</strong>.</li>
-            <li>Click <strong>Toggle timestamps</strong> (ensure times are visible).</li>
+            <li>Click <strong>Toggle timestamps</strong> if times are not visible).</li>
             <li>Copy the entire list and paste it below.</li>
           </ul>
-
-          <p className="font-bold mb-1">Option 2: 3rd Party Tools</p>
-          <p className="mb-3 text-blue-800">
-            You can use tools like <a href="https://tactiq.io/tools/youtube-transcript" target="_blank" rel="noopener noreferrer" className="underline font-bold hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-1">Tactiq.io</a> to quickly capture transcripts from YouTube videos using the video url.
-          </p>
-
           <p className="mt-2 text-xs text-blue-700 italic border-t border-blue-200 pt-2">
             Note: We cannot accept YouTube URLs directly due to YouTube's privacy and security settings. For best results, please avoid pasting transcripts longer than 5 minutes at this time. Longer transcripts may cause timing drift or formatting errors in the generated SRT file. We’re actively working on a fix.
           </p>
