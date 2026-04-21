@@ -362,9 +362,9 @@ ${srtContent}`;
 
 /* ================================
    SRT Timing Normalization
-   
+
    Architecture: Four strict, ordered passes.
-   
+
    Pass 1 — MERGE: Combine short/incomplete blocks into readable units.
              Never touch timestamps here — only collapse text.
    Pass 2 — ABSORB ORPHANS: Pull tiny fragment blocks (< 4 words) back
@@ -453,18 +453,16 @@ const parseSrt = (srt: string): SrtBlock[] => {
   return parsed.sort((a, b) => a.start - b.start);
 };
 
-/* -------- Line splitting (enforces max 50 chars per line, max 2 lines) -------- */
+/* -------- Line splitting (max 50 chars per line, max 2 lines) -------- */
 
 const splitIntoLines = (text: string): string[] => {
   const MAX_LINE = 50;
 
   if (text.length <= MAX_LINE) return [text];
 
-  // Try to split at a natural boundary near the middle
   const mid = Math.floor(text.length / 2);
   const breakChars = [" ", ",", ";"];
 
-  // Search outward from midpoint for a good break
   for (let radius = 0; radius < mid; radius++) {
     for (const dir of [1, -1]) {
       const pos = mid + dir * radius;
@@ -472,7 +470,6 @@ const splitIntoLines = (text: string): string[] => {
       if (breakChars.includes(text[pos] ?? "")) {
         const line1 = text.slice(0, pos).trimEnd();
         const line2 = text.slice(pos).trimStart();
-        // Only use this split if both lines are within limit
         if (line1.length <= MAX_LINE && line2.length <= MAX_LINE) {
           return [line1, line2];
         }
@@ -491,12 +488,8 @@ const serializeSrt = (blocks: SrtBlock[]): string =>
     .map((b, idx) => {
       const rawText = b.text.join(" ").trim();
       const lines = splitIntoLines(rawText);
-      // Enforce max 2 lines — if splitIntoLines returns more, join the overflow
-      const finalLines =
-        lines.length > 2
-          ? [lines.slice(0, 2).join(" ")]
-          : lines;
-
+      // Enforce max 2 lines
+      const finalLines = lines.length > 2 ? [lines.slice(0, 2).join(" ")] : lines;
       const timing = `${formatTime(b.start)} --> ${formatTime(b.end)}`;
       return `${idx + 1}\n${timing}\n${finalLines.join("\n")}`;
     })
@@ -554,21 +547,17 @@ const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
 };
 
 /* -------- Pass 2: Absorb orphan fragments -------- */
-// A block is an orphan if it has fewer than 4 words and doesn't form
-// a complete thought on its own (e.g. "Korea. Not." or "Johnny's.")
 
 const orphanPass = (blocks: SrtBlock[]): SrtBlock[] => {
   const MIN_WORDS = 4;
 
-  let i = 1; // Start at 1 — absorb backward into previous
+  let i = 1;
   while (i < blocks.length) {
     const current = blocks[i]!;
     const prev = blocks[i - 1]!;
 
     if (isBracket(current) || isBracket(prev)) { i++; continue; }
-
-    const isOrphan = wordCount(current) < MIN_WORDS;
-    if (!isOrphan) { i++; continue; }
+    if (wordCount(current) >= MIN_WORDS) { i++; continue; }
 
     const prevText = prev.text.join(" ").trim();
     const currentText = current.text.join(" ").trim();
@@ -579,12 +568,10 @@ const orphanPass = (blocks: SrtBlock[]): SrtBlock[] => {
 
     const combinedCps = combinedText.length / combinedDuration;
 
-    // Only absorb if it stays readable
     if (combinedText.length <= 100 && combinedCps <= 18) {
       prev.text = [combinedText];
       prev.end = current.end;
       blocks.splice(i, 1);
-      // Don't increment — re-check the same position
     } else {
       i++;
     }
