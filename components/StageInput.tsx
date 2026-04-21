@@ -24,7 +24,7 @@ const StageInput: React.FC<Props> = ({ onNext, isValidating }) => {
           <ul className="list-disc pl-5 space-y-1 mb-4 text-blue-800">
             <li>Go to the YouTube video.</li>
             <li>Click <strong>...More</strong> (or description) → <strong>Show transcript</strong>.</li>
-            <li>Click <strong>Toggle timestamps</strong> if times are not visible).</li>
+            <li>Click <strong>Toggle timestamps</strong> (only if times are not visible).</li>
             <li>Copy the entire list and paste it below.</li>
           </ul>
           <p className="mt-2 text-xs text-blue-700 italic border-t border-blue-200 pt-2">
