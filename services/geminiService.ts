@@ -2,104 +2,73 @@ import { CorrectionMode, SpellingCorrection, SupportedLanguage } from "../types"
 
 const MODEL_NAME = "gemini-2.5-flash";
 
-/* ================================
-   SYSTEM INSTRUCTIONS
-================================ */
-
 const BASE_SYSTEM_INSTRUCTION = `
 You are a deterministic SRT formatting engine. You follow rules, not preferences.
 
 **CRITICAL: Clean up the ending.**
-Transcripts often contain hallucinated or auto-generated garbage at the very end like "You.", "Subtitles by...", or single words that do not match the audio. REMOVE THESE.
+Transcripts often end with hallucinated garbage like "You.", "Subtitles by...", single orphan words. REMOVE THESE.
 
 ====================
 CHEMISTRY CONSISTENCY RULES (STRICT)
 ====================
 • Do NOT convert written chemical words into formulas.
-  - "carbon dioxide" must remain "carbon dioxide".
-  - "nicotinamide adenine dinucleotide" must remain as written.
-  
-• Only convert **explicit chemical formulas** found in the transcript:
-  - CO2 → CO₂
-  - FADH2 → FADH₂
-  - FADH-2 → FADH₂
-  - H2O → H₂O
-  - NADH must ALWAYS remain exactly "NADH".
-  - Never rewrite NADH as NADH₂ or any variant.
-
-• NEVER rewrite "dioxide" as "CO₂".
-• NEVER rewrite "oxygen" as "O₂".
-• NEVER rewrite "hydrogen" as "H₂".
+• Only convert explicit chemical formulas found in the transcript:
+  - CO2 → CO₂, FADH2 → FADH₂, H2O → H₂O
+  - NADH must ALWAYS remain exactly "NADH". Never rewrite as NADH₂.
 • NEVER infer or guess chemical formulas.
-
-If the transcript uses words, keep words.
-If the transcript uses formulas, keep formulas.
 
 ====================
 REPETITION RULES
 ====================
-- **NO HALLUCINATED REPETITION:** Do not duplicate clauses or sentences (e.g. "So if you are doing / if you are doing").
-- If the output contains two identical back-to-back lines/phrases, **DELETE ONE**.
-- Ensure clean flow without accidental stammers unless they are explicitly in the source text.
+- NO HALLUCINATED REPETITION. Do not duplicate clauses or sentences.
+- If two identical back-to-back phrases appear, DELETE ONE.
 
 ====================
 MERGING RULES (STRICT)
 ====================
-You MUST merge two consecutive timestamp buckets into ONE subtitle block when ALL conditions are true:
-1. The combined text is **50 characters or fewer**.
-2. The merged block contains no more than 2 lines.
-3. The first bucket does NOT end in ".", "?", "!".
-4. The second bucket continues the same phrase (not a new idea).
-5. Merging does NOT create a tall block that obstructs the video.
-
-When these rules are met, merging is **REQUIRED**, not optional.
-
-====================
-WHEN NOT TO MERGE
-====================
-Do NOT merge when:
-- The merged text exceeds 50 characters.
-- The first bucket ends in ".", "?", or "!".
-- The two lines form separate ideas.
-- Merging creates more than 2 lines.
+Merge two consecutive buckets into ONE block when ALL are true:
+1. Combined text is 50 characters or fewer.
+2. No more than 2 lines after merge.
+3. First bucket does NOT end in ".", "?", "!".
+4. Second bucket continues the same phrase.
 
 ====================
 LINE FORMAT RULES
 ====================
-- **Max 2 lines per block.**
-- **Max 50 characters per line.**
+- Max 2 lines per block.
+- Max 50 characters per line.
 - Prefer ONE line whenever possible.
 - NEVER leave a trailing orphan word on its own line.
-- Split long lines according to natural phrase boundaries.
+- NEVER start a line with a comma, period, or other punctuation mark.
+  If a split would put punctuation at the start of a line, move the
+  split point so punctuation stays at the end of the previous line.
 
 ====================
 CAPITALIZATION RULES
 ====================
-- The **first word of every subtitle block** MUST be capitalized.
-- Do NOT change the capitalization of any other word in the block.
-- This applies even when the source transcript is all-lowercase.
+- Only capitalize the first word of a block when it genuinely starts
+  a NEW sentence (previous block ended with ".", "?", or "!", or it is
+  the very first block).
+- Do NOT capitalize the first word of a block that continues a sentence
+  mid-stream from the previous block.
+- Do NOT change capitalization of any other word.
 
 ====================
 MUSIC / BRACKET BOUNDARY RULES
 ====================
-- [Music] and other bracketed cues (e.g. [Applause]) are their own isolated block.
-- NEVER merge a speech line into a [Music] block or vice versa.
-- If a sentence is interrupted by [Music], keep the speech BEFORE [Music] in its own block
-  and any speech that resumes AFTER [Music] in its own separate block.
-- The word immediately following a [Music] block starts a NEW subtitle block —
-  do NOT attach it to the end of the [Music] block.
+- [Music] and other bracketed cues are their own isolated block.
+- NEVER merge speech into a [Music] block or vice versa.
 
 ====================
 TIMING RULES
 ====================
-- **Start time of each block MUST match the first timestamp in the bucket.**
-- Do not move text to earlier timestamps, even if grammatically tempting.
-- Splitting creates new blocks with interpolated start times.
+- Start time of each block MUST match the first timestamp in the bucket.
+- Do not move text to earlier timestamps.
 
 ====================
 OUTPUT
 ====================
-Produce valid SRT blocks:
+Produce valid SRT:
 1
 00:00:00,000 --> 00:00:02,000
 text line 1
@@ -111,56 +80,17 @@ text line 2
 const TRANSLATION_SYSTEM_INSTRUCTION = `
 You are a professional caption translator. Follow these rules:
 
-1. Preserve Scientific Terms Exactly
-Do NOT change biochemical names:
-"NADH", "NAD+", "FADH₂", "ATP", "ADP", "CO₂", "acetyl-CoA", "oxaloacetate", "citric acid", etc.
-Never alter or "improve" these terms.
-Preserve capitalization.
+1. Preserve Scientific Terms Exactly — never alter "NADH", "NAD+", "FADH₂", "ATP", "CO₂", etc.
+2. Preserve Subscripts Using Unicode — CO₂, FADH₂, H₂O.
+3. Never Add Missing Atoms — don't turn "NADH" into "NADH₂".
+4. Maintain Meaning, Not Literal Word Order.
+5. Maintain Titles, Music Notes, and Brackets in target language.
+6. DO NOT change timing or subtitle numbers.
+7. Max 50 characters per line. Max 2 lines per block.
+8. Never paraphrase scientific sequences.
 
-2. Preserve Subscripts Using Unicode
-H₂ → use ₂
-CO₂ → CO₂
-FADH₂ → FADH₂
-
-3. Never Add Missing Atoms
-❌ Don't turn "NADH" → "NADH₂"
-❌ Don't turn "CO₂" → "carbon CO₂" unless explicitly written.
-
-4. Maintain Meaning, Not Literal Word Order
-Translate for natural reading in each target language.
-
-5. Maintain Titles, Music Notes, and Brackets
-If transcript includes:
-[Music]
-[음악]
-[laughs]
-Preserve the meaning in the target language.
-
-6. DO NOT change timing or subtitle numbers
-Input timestamps must remain exactly the same.
-
-7. Follow Subtitle Line-Length Rules
-Prefer one-line captions.
-Max 50 characters per line.
-Only use two lines if absolutely necessary.
-Never merge across timestamp buckets.
-
-8. Never paraphrase scientific sequences
-When describing processes (e.g., Krebs cycle), maintain precise causality.
-
-==========================
-OUTPUT FORMAT
-==========================
-Return ONLY the translated SRT file.
-No backticks (e.g. no \`\`\`srt).
-No explanations.
-No commentary.
+OUTPUT FORMAT: Return ONLY the translated SRT. No backticks, no explanations.
 `;
-
-
-/* ================================
-   HELPER: Gemini Proxy Call
-================================ */
 
 async function callGemini({
   contents,
@@ -173,26 +103,12 @@ async function callGemini({
 }) {
   const response = await fetch("/api/generate", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      contents,
-      config,
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, contents, config }),
   });
-
-  if (!response.ok) {
-    throw new Error("Gemini request failed");
-  }
-
+  if (!response.ok) throw new Error("Gemini request failed");
   return response.json();
 }
-
-/* ================================
-   Timestamp Validation
-================================ */
 
 export const validateTimestamps = async (text: string): Promise<boolean> => {
   try {
@@ -202,11 +118,8 @@ Reply with strict JSON: { "hasTimestamps": boolean }
 
 Text:
 ${text.substring(0, 1000)}... (truncated)`,
-      config: {
-        responseMimeType: "application/json",
-      },
+      config: { responseMimeType: "application/json" },
     });
-
     const parsed = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
     return parsed.hasTimestamps === true;
   } catch {
@@ -214,46 +127,31 @@ ${text.substring(0, 1000)}... (truncated)`,
   }
 };
 
-/* ================================
-   Spelling Corrections
-================================ */
-
 export const proposeCorrections = async (text: string): Promise<SpellingCorrection[]> => {
   const prompt = `
 Analyze this transcript for clear spelling mistakes only.
-
-CRITICAL:
 - Do NOT suggest grammar improvements.
 - Do NOT rephrase spoken language.
 - Do NOT fix informal speech.
 - Only flag obvious typos that are clearly incorrect words.
 - If uncertain, do NOT suggest a correction.
 
-Return a JSON array with objects:
-{ original, correction, context, timestamp }
+Return a JSON array: { original, correction, context, timestamp }
 
 Transcript:
 ${text}
 `;
-
   try {
     const result = await callGemini({
       contents: prompt,
-      config: {
-        temperature: 0.0,
-        responseMimeType: "application/json",
-      },
+      config: { temperature: 0.0, responseMimeType: "application/json" },
     });
-
     const raw = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "[]");
-
     const filtered = raw.filter((c: any) => {
       if (!c.original || !c.correction) return false;
-      const distance = Math.abs(c.original.length - c.correction.length);
-      if (distance > 3) return false;
+      if (Math.abs(c.original.length - c.correction.length) > 3) return false;
       return true;
     });
-
     return filtered.map((c: any, index: number) => ({
       ...c,
       id: `corr-${index}`,
@@ -264,10 +162,6 @@ ${text}
     return [];
   }
 };
-
-/* ================================
-   SRT Generation
-================================ */
 
 export const generateSrt = async (
   text: string,
@@ -280,13 +174,13 @@ export const generateSrt = async (
     prompt = `Convert the following transcript into a valid SRT file.
 
 CRITICAL RULES:
-- Preserve spoken wording exactly as written.
-- Do NOT change punctuation.
-- Do NOT rephrase sentences.
-- Only format into valid SRT structure.
-- Only adjust line breaks and merging for readability.
-- Do NOT alter timestamps.
-- Capitalize the first word of every subtitle block (see system instructions).
+- Preserve ALL spoken wording EXACTLY as written. Do not change a single word.
+- Do NOT fix spelling, grammar, or punctuation — not even obvious errors.
+- Do NOT rephrase, add, or remove any words.
+- Only task: format into valid SRT blocks with correct line breaks.
+- Only capitalize the first word of a block when it genuinely starts a new sentence.
+  Do NOT capitalize mid-sentence continuations from the previous block.
+- NEVER start a subtitle line with a punctuation mark.
 
 Transcript:
 ${text}`;
@@ -294,17 +188,15 @@ ${text}`;
     prompt = `Convert the following transcript into a valid SRT file.
 
 CRITICAL RULES:
-- Preserve spoken wording exactly as written.
-- Do NOT rephrase sentences.
-- Do NOT rewrite wording.
-- Do NOT change meaning.
+- Preserve spoken wording and meaning exactly.
+- Do NOT rephrase or rewrite sentences.
+- You MAY fix clear spelling errors.
 - You MAY add missing terminal punctuation (., ?, !).
 - You MAY add minimal commas only when clearly needed.
 - Do NOT improve grammar beyond punctuation.
-- Only format into valid SRT structure.
-- Only adjust line breaks and merging for readability.
-- Do NOT alter timestamps.
-- Capitalize the first word of every subtitle block (see system instructions).
+- Only capitalize the first word of a block when it genuinely starts a new sentence.
+  Do NOT capitalize mid-sentence continuations from the previous block.
+- NEVER start a subtitle line with a punctuation mark.
 
 Transcript:
 ${text}`;
@@ -312,282 +204,188 @@ ${text}`;
 
   const result = await callGemini({
     contents: prompt,
-    config: {
-      systemInstruction: BASE_SYSTEM_INSTRUCTION,
-      temperature: 0.0,
-    },
+    config: { systemInstruction: BASE_SYSTEM_INSTRUCTION, temperature: 0.0 },
   });
 
   let cleanText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
   cleanText = cleanText
-    .replace(/^```srt\n/, "")
-    .replace(/^```\n/, "")
-    .replace(/^```/, "")
-    .replace(/```$/, "");
+    .replace(/^```srt\n/, "").replace(/^```\n/, "")
+    .replace(/^```/, "").replace(/```$/, "");
 
   return normalizeSrtTiming(cleanText.trim());
 };
-
-/* ================================
-   Translation
-================================ */
 
 export const translateSrt = async (
   srtContent: string,
   targetLanguage: SupportedLanguage
 ): Promise<string> => {
-  const prompt = `Translate this transcript into ${targetLanguage}:
-
-${srtContent}`;
-
   const result = await callGemini({
-    contents: prompt,
-    config: {
-      systemInstruction: TRANSLATION_SYSTEM_INSTRUCTION,
-      temperature: 0.1,
-    },
+    contents: `Translate this transcript into ${targetLanguage}:\n\n${srtContent}`,
+    config: { systemInstruction: TRANSLATION_SYSTEM_INSTRUCTION, temperature: 0.1 },
   });
 
   let translated = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
   translated = translated
-    .replace(/^```srt\n/, "")
-    .replace(/^```\n/, "")
-    .replace(/^```/, "")
-    .replace(/```$/, "");
+    .replace(/^```srt\n/, "").replace(/^```\n/, "")
+    .replace(/^```/, "").replace(/```$/, "");
 
   return translated.trim();
 };
 
 /* ================================
    SRT Timing Normalization
-   
-   Architecture: Three strict, ordered passes.
-   
-   Pass 1 — MERGE: Combine short/incomplete blocks into readable units.
-             Never touch timestamps here — only collapse text.
-   Pass 2 — ENFORCE MINIMUMS: Expand blocks that are too short to read,
-             working only forward from each block's own start time.
-   Pass 3 — RESOLVE OVERLAPS: Walk forward in order, clipping any block
-             whose end exceeds the next block's start. Drift-free by design
-             since we never shift start times.
+   Pass 1 — MERGE incomplete blocks forward
+   Pass 2 — ABSORB orphan fragments backward
+   Pass 3 — ENFORCE minimum display duration
+   Pass 4 — RESOLVE overlaps (never shift start times)
 ================================ */
 
 type SrtBlock = {
   index: number;
-  start: number;  // seconds (float)
-  end: number;    // seconds (float)
+  start: number;
+  end: number;
   text: string[];
 };
 
-/* -------- Time helpers -------- */
-
 const parseTime = (time: string): number => {
-  // Accepts "HH:MM:SS,mmm" or "MM:SS,mmm"
   const [hms, msPart] = time.trim().split(",");
   const parts = hms.split(":").map(Number);
   const ms = parseInt(msPart || "0", 10);
-
-  if (parts.length === 3) {
-    const [h, m, s] = parts;
-    return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s ?? 0) + ms / 1000;
-  }
-  if (parts.length === 2) {
-    const [m, s] = parts;
-    return (m ?? 0) * 60 + (s ?? 0) + ms / 1000;
-  }
+  if (parts.length === 3)
+    return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0) + ms / 1000;
+  if (parts.length === 2)
+    return (parts[0] ?? 0) * 60 + (parts[1] ?? 0) + ms / 1000;
   return 0;
 };
 
 const formatTime = (totalSeconds: number): string => {
-  const clamped = Math.max(0, totalSeconds);
-  const h = Math.floor(clamped / 3600);
-  const m = Math.floor((clamped % 3600) / 60);
-  const s = Math.floor(clamped % 60);
-  const ms = Math.round((clamped - Math.floor(clamped)) * 1000);
-
+  const c = Math.max(0, totalSeconds);
+  const h = Math.floor(c / 3600);
+  const m = Math.floor((c % 3600) / 60);
+  const s = Math.floor(c % 60);
+  const ms = Math.round((c - Math.floor(c)) * 1000);
   return (
-    String(h).padStart(2, "0") +
-    ":" +
-    String(m).padStart(2, "0") +
-    ":" +
-    String(s).padStart(2, "0") +
-    "," +
+    String(h).padStart(2, "0") + ":" +
+    String(m).padStart(2, "0") + ":" +
+    String(s).padStart(2, "0") + "," +
     String(ms).padStart(3, "0")
   );
 };
 
-/* -------- Parser -------- */
-
 const parseSrt = (srt: string): SrtBlock[] => {
-  const blocks = srt.split(/\n\s*\n/);
   const parsed: SrtBlock[] = [];
-
-  for (const block of blocks) {
+  for (const block of srt.split(/\n\s*\n/)) {
     const lines = block.trim().split("\n");
     if (lines.length < 3) continue;
-
-    const firstLine = lines[0] ?? "";
-    const timingLine = lines[1] ?? "";
-    const index = parseInt(firstLine, 10);
+    const index = parseInt(lines[0] ?? "", 10);
     if (isNaN(index)) continue;
-
+    const timingLine = lines[1] ?? "";
     const arrowIdx = timingLine.indexOf(" --> ");
     if (arrowIdx === -1) continue;
-
-    const startStr = timingLine.slice(0, arrowIdx);
-    const endStr = timingLine.slice(arrowIdx + 5);
-    const start = parseTime(startStr);
-    const end = parseTime(endStr);
-
+    const start = parseTime(timingLine.slice(0, arrowIdx));
+    const end = parseTime(timingLine.slice(arrowIdx + 5));
     if (isNaN(start) || isNaN(end) || end <= start) continue;
-
-    parsed.push({
-      index,
-      start,
-      end,
-      text: lines.slice(2),
-    });
+    parsed.push({ index, start, end, text: lines.slice(2) });
   }
-
-  // Sort by start time — defensive guard against out-of-order LLM output
   return parsed.sort((a, b) => a.start - b.start);
 };
 
-/* -------- Serializer -------- */
+const splitIntoLines = (text: string): string[] => {
+  const MAX = 50;
+  if (text.length <= MAX) return [text];
 
-const serializeSrt = (blocks: SrtBlock[]): string =>
-  blocks
-    .map((b, idx) => {
-      const timing = `${formatTime(b.start)} --> ${formatTime(b.end)}`;
-      return `${idx + 1}\n${timing}\n${b.text.join("\n")}`;
-    })
-    .join("\n\n");
-
-/* -------- Pass 1: Merge short / incomplete blocks -------- */
-
-const BRACKET_RE = /^\[.*\]$/;
-
-const isBracket = (block: SrtBlock): boolean =>
-  BRACKET_RE.test(block.text.join(" ").trim());
-
-const endsWithTerminalPunctuation = (block: SrtBlock): boolean =>
-  /[.?!]$/.test(block.text.join(" ").trim());
-
-const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
-  // Thresholds
-  const MAX_COMBINED_CHARS = 90;
-  const MAX_MERGE_CPS = 17;
-
-  let i = 0;
-  while (i < blocks.length - 1) {
-    const current = blocks[i]!;
-    const next = blocks[i + 1]!;
-
-    // Never merge across bracket boundaries
-    if (isBracket(current) || isBracket(next)) {
-      i++;
-      continue;
-    }
-
-    // Don't merge over a sentence boundary
-    if (endsWithTerminalPunctuation(current)) {
-      i++;
-      continue;
-    }
-
-    const currentText = current.text.join(" ").trim();
-    const nextText = next.text.join(" ").trim();
-    const combinedText = `${currentText} ${nextText}`;
-    const combinedDuration = next.end - current.start;
-
-    // Guard against degenerate durations
-    if (combinedDuration <= 0) {
-      i++;
-      continue;
-    }
-
-    const combinedCps = combinedText.length / combinedDuration;
-
-    if (
-      combinedText.length <= MAX_COMBINED_CHARS &&
-      combinedCps <= MAX_MERGE_CPS
-    ) {
-      current.text = [combinedText];
-      current.end = next.end;
-      blocks.splice(i + 1, 1);
-      // Re-examine current block — maybe it can absorb the new next too
-    } else {
-      i++;
-    }
-  }
-
-  return blocks;
-};
-
-/* -------- Pass 2: Enforce minimum duration and readable CPS -------- */
-
-const durationPass = (blocks: SrtBlock[]): SrtBlock[] => {
-  const MIN_DURATION = 1.5;   // seconds — absolute floor
-  const MIN_DISPLAY = 2.0;    // seconds — comfortable reading minimum
-  const MAX_CPS = 15;         // characters per second ceiling
-
-  for (const block of blocks) {
-    if (isBracket(block)) continue;
-
-    const charCount = block.text.join(" ").length;
-    const rawDuration = block.end - block.start;
-
-    // How long does this block actually need?
-    const neededForCps = charCount / MAX_CPS;
-    const needed = Math.max(MIN_DURATION, MIN_DISPLAY, neededForCps);
-
-    if (rawDuration < needed) {
-      // Extend end — never touch start
-      block.end = block.start + needed;
-    }
-  }
-
-  return blocks;
-};
-
-/* -------- Pass 3: Resolve overlaps (forward-only, no drift) -------- */
-
-const overlapPass = (blocks: SrtBlock[]): SrtBlock[] => {
-  const MIN_GAP = 0.001; // 1 ms — blocks must not touch exactly
-
-  for (let i = 0; i < blocks.length - 1; i++) {
-    const current = blocks[i]!;
-    const next = blocks[i + 1]!;
-
-    if (current.end >= next.start) {
-      // Clip current's end to just before next starts.
-      // Never move current.start or next.start — that's what kills drift.
-      const clipped = next.start - MIN_GAP;
-
-      // Only apply clip if it still leaves a visible block (>= 0.5s)
-      if (clipped - current.start >= 0.5) {
-        current.end = clipped;
-      } else {
-        // Block is too short to salvage; collapse it forward
-        current.end = next.start - MIN_GAP;
+  const mid = Math.floor(text.length / 2);
+  for (let r = 0; r < mid; r++) {
+    for (const dir of [1, -1]) {
+      const pos = mid + dir * r;
+      if (pos <= 0 || pos >= text.length) continue;
+      if (text[pos] === " ") {
+        const l1 = text.slice(0, pos).trimEnd();
+        const l2 = text.slice(pos + 1).trimStart();
+        if (/^[.,;:!?]/.test(l2)) continue;
+        if (l1.length <= MAX && l2.length <= MAX) return [l1, l2];
       }
     }
   }
+  const lastSpace = text.lastIndexOf(" ", MAX);
+  if (lastSpace > 0) return [text.slice(0, lastSpace), text.slice(lastSpace + 1)];
+  return [text.slice(0, MAX), text.slice(MAX).trim()];
+};
 
+const serializeSrt = (blocks: SrtBlock[]): string =>
+  blocks.map((b, idx) => {
+    const raw = b.text.join(" ").trim();
+    const lines = splitIntoLines(raw);
+    const final = lines.length > 2 ? [lines[0]!, lines.slice(1).join(" ")] : lines;
+    return `${idx + 1}\n${formatTime(b.start)} --> ${formatTime(b.end)}\n${final.join("\n")}`;
+  }).join("\n\n");
+
+const BRACKET_RE = /^\[.*\]$/;
+const isBracket = (b: SrtBlock) => BRACKET_RE.test(b.text.join(" ").trim());
+const endsTerminal = (b: SrtBlock) => /[.?!]$/.test(b.text.join(" ").trim());
+const wc = (b: SrtBlock) => b.text.join(" ").trim().split(/\s+/).length;
+
+const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
+  let i = 0;
+  while (i < blocks.length - 1) {
+    const cur = blocks[i]!;
+    const nxt = blocks[i + 1]!;
+    if (isBracket(cur) || isBracket(nxt) || endsTerminal(cur)) { i++; continue; }
+    const combined = `${cur.text.join(" ").trim()} ${nxt.text.join(" ").trim()}`;
+    const dur = nxt.end - cur.start;
+    if (dur <= 0) { i++; continue; }
+    if (combined.length <= 90 && combined.length / dur <= 17) {
+      cur.text = [combined]; cur.end = nxt.end;
+      blocks.splice(i + 1, 1);
+    } else { i++; }
+  }
   return blocks;
 };
 
-/* -------- Main entry point -------- */
+const orphanPass = (blocks: SrtBlock[]): SrtBlock[] => {
+  let i = 1;
+  while (i < blocks.length) {
+    const cur = blocks[i]!;
+    const prev = blocks[i - 1]!;
+    if (isBracket(cur) || isBracket(prev) || wc(cur) >= 4) { i++; continue; }
+    const combined = `${prev.text.join(" ").trim()} ${cur.text.join(" ").trim()}`;
+    const dur = cur.end - prev.start;
+    if (dur <= 0) { i++; continue; }
+    if (combined.length <= 100 && combined.length / dur <= 18) {
+      prev.text = [combined]; prev.end = cur.end;
+      blocks.splice(i, 1);
+    } else { i++; }
+  }
+  return blocks;
+};
+
+const durationPass = (blocks: SrtBlock[]): SrtBlock[] => {
+  for (const b of blocks) {
+    if (isBracket(b)) continue;
+    const needed = Math.max(1.5, 2.0, b.text.join(" ").length / 15);
+    if (b.end - b.start < needed) b.end = b.start + needed;
+  }
+  return blocks;
+};
+
+const overlapPass = (blocks: SrtBlock[]): SrtBlock[] => {
+  for (let i = 0; i < blocks.length - 1; i++) {
+    const cur = blocks[i]!;
+    const nxt = blocks[i + 1]!;
+    if (cur.end >= nxt.start) {
+      const clipped = nxt.start - 0.001;
+      cur.end = clipped - cur.start >= 0.5 ? clipped : nxt.start - 0.001;
+    }
+  }
+  return blocks;
+};
 
 const normalizeSrtTiming = (srt: string): string => {
   let blocks = parseSrt(srt);
-  if (blocks.length === 0) return srt; // Nothing parseable — return as-is
-
+  if (blocks.length === 0) return srt;
   blocks = mergePass(blocks);
+  blocks = orphanPass(blocks);
   blocks = durationPass(blocks);
   blocks = overlapPass(blocks);
-
   return serializeSrt(blocks);
 };
