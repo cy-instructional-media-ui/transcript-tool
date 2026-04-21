@@ -362,39 +362,40 @@ ${srtContent}`;
 
 /* ================================
    SRT Timing Normalization
-
-   Architecture: Four strict, ordered passes.
-
+   
+   Architecture: Three strict, ordered passes.
+   
    Pass 1 — MERGE: Combine short/incomplete blocks into readable units.
              Never touch timestamps here — only collapse text.
-   Pass 2 — ABSORB ORPHANS: Pull tiny fragment blocks (< 4 words) back
-             into the previous block if they don't form a complete thought.
-   Pass 3 — ENFORCE MINIMUMS: Expand blocks that are too short to read,
+   Pass 2 — ENFORCE MINIMUMS: Expand blocks that are too short to read,
              working only forward from each block's own start time.
-   Pass 4 — RESOLVE OVERLAPS: Walk forward in order, clipping any block
+   Pass 3 — RESOLVE OVERLAPS: Walk forward in order, clipping any block
              whose end exceeds the next block's start. Drift-free by design
              since we never shift start times.
 ================================ */
 
 type SrtBlock = {
   index: number;
-  start: number;
-  end: number;
+  start: number;  // seconds (float)
+  end: number;    // seconds (float)
   text: string[];
 };
 
 /* -------- Time helpers -------- */
 
 const parseTime = (time: string): number => {
+  // Accepts "HH:MM:SS,mmm" or "MM:SS,mmm"
   const [hms, msPart] = time.trim().split(",");
   const parts = hms.split(":").map(Number);
   const ms = parseInt(msPart || "0", 10);
 
   if (parts.length === 3) {
-    return (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0) + ms / 1000;
+    const [h, m, s] = parts;
+    return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s ?? 0) + ms / 1000;
   }
   if (parts.length === 2) {
-    return (parts[0] ?? 0) * 60 + (parts[1] ?? 0) + ms / 1000;
+    const [m, s] = parts;
+    return (m ?? 0) * 60 + (s ?? 0) + ms / 1000;
   }
   return 0;
 };
@@ -450,35 +451,8 @@ const parseSrt = (srt: string): SrtBlock[] => {
     });
   }
 
+  // Sort by start time — defensive guard against out-of-order LLM output
   return parsed.sort((a, b) => a.start - b.start);
-};
-
-/* -------- Line splitting (max 50 chars per line, max 2 lines) -------- */
-
-const splitIntoLines = (text: string): string[] => {
-  const MAX_LINE = 50;
-
-  if (text.length <= MAX_LINE) return [text];
-
-  const mid = Math.floor(text.length / 2);
-  const breakChars = [" ", ",", ";"];
-
-  for (let radius = 0; radius < mid; radius++) {
-    for (const dir of [1, -1]) {
-      const pos = mid + dir * radius;
-      if (pos <= 0 || pos >= text.length) continue;
-      if (breakChars.includes(text[pos] ?? "")) {
-        const line1 = text.slice(0, pos).trimEnd();
-        const line2 = text.slice(pos).trimStart();
-        if (line1.length <= MAX_LINE && line2.length <= MAX_LINE) {
-          return [line1, line2];
-        }
-      }
-    }
-  }
-
-  // Fallback: hard split at MAX_LINE
-  return [text.slice(0, MAX_LINE), text.slice(MAX_LINE).trim()];
 };
 
 /* -------- Serializer -------- */
@@ -486,16 +460,12 @@ const splitIntoLines = (text: string): string[] => {
 const serializeSrt = (blocks: SrtBlock[]): string =>
   blocks
     .map((b, idx) => {
-      const rawText = b.text.join(" ").trim();
-      const lines = splitIntoLines(rawText);
-      // Enforce max 2 lines
-      const finalLines = lines.length > 2 ? [lines.slice(0, 2).join(" ")] : lines;
       const timing = `${formatTime(b.start)} --> ${formatTime(b.end)}`;
-      return `${idx + 1}\n${timing}\n${finalLines.join("\n")}`;
+      return `${idx + 1}\n${timing}\n${b.text.join("\n")}`;
     })
     .join("\n\n");
 
-/* -------- Helpers -------- */
+/* -------- Pass 1: Merge short / incomplete blocks -------- */
 
 const BRACKET_RE = /^\[.*\]$/;
 
@@ -505,12 +475,8 @@ const isBracket = (block: SrtBlock): boolean =>
 const endsWithTerminalPunctuation = (block: SrtBlock): boolean =>
   /[.?!]$/.test(block.text.join(" ").trim());
 
-const wordCount = (block: SrtBlock): number =>
-  block.text.join(" ").trim().split(/\s+/).length;
-
-/* -------- Pass 1: Merge short / incomplete blocks forward -------- */
-
 const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
+  // Thresholds
   const MAX_COMBINED_CHARS = 90;
   const MAX_MERGE_CPS = 17;
 
@@ -519,15 +485,28 @@ const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
     const current = blocks[i]!;
     const next = blocks[i + 1]!;
 
-    if (isBracket(current) || isBracket(next)) { i++; continue; }
-    if (endsWithTerminalPunctuation(current)) { i++; continue; }
+    // Never merge across bracket boundaries
+    if (isBracket(current) || isBracket(next)) {
+      i++;
+      continue;
+    }
+
+    // Don't merge over a sentence boundary
+    if (endsWithTerminalPunctuation(current)) {
+      i++;
+      continue;
+    }
 
     const currentText = current.text.join(" ").trim();
     const nextText = next.text.join(" ").trim();
     const combinedText = `${currentText} ${nextText}`;
     const combinedDuration = next.end - current.start;
 
-    if (combinedDuration <= 0) { i++; continue; }
+    // Guard against degenerate durations
+    if (combinedDuration <= 0) {
+      i++;
+      continue;
+    }
 
     const combinedCps = combinedText.length / combinedDuration;
 
@@ -538,6 +517,7 @@ const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
       current.text = [combinedText];
       current.end = next.end;
       blocks.splice(i + 1, 1);
+      // Re-examine current block — maybe it can absorb the new next too
     } else {
       i++;
     }
@@ -546,56 +526,25 @@ const mergePass = (blocks: SrtBlock[]): SrtBlock[] => {
   return blocks;
 };
 
-/* -------- Pass 2: Absorb orphan fragments -------- */
-
-const orphanPass = (blocks: SrtBlock[]): SrtBlock[] => {
-  const MIN_WORDS = 4;
-
-  let i = 1;
-  while (i < blocks.length) {
-    const current = blocks[i]!;
-    const prev = blocks[i - 1]!;
-
-    if (isBracket(current) || isBracket(prev)) { i++; continue; }
-    if (wordCount(current) >= MIN_WORDS) { i++; continue; }
-
-    const prevText = prev.text.join(" ").trim();
-    const currentText = current.text.join(" ").trim();
-    const combinedText = `${prevText} ${currentText}`;
-    const combinedDuration = current.end - prev.start;
-
-    if (combinedDuration <= 0) { i++; continue; }
-
-    const combinedCps = combinedText.length / combinedDuration;
-
-    if (combinedText.length <= 100 && combinedCps <= 18) {
-      prev.text = [combinedText];
-      prev.end = current.end;
-      blocks.splice(i, 1);
-    } else {
-      i++;
-    }
-  }
-
-  return blocks;
-};
-
-/* -------- Pass 3: Enforce minimum duration -------- */
+/* -------- Pass 2: Enforce minimum duration and readable CPS -------- */
 
 const durationPass = (blocks: SrtBlock[]): SrtBlock[] => {
-  const MIN_DURATION = 1.5;
-  const MIN_DISPLAY = 2.0;
-  const MAX_CPS = 15;
+  const MIN_DURATION = 1.5;   // seconds — absolute floor
+  const MIN_DISPLAY = 2.0;    // seconds — comfortable reading minimum
+  const MAX_CPS = 15;         // characters per second ceiling
 
   for (const block of blocks) {
     if (isBracket(block)) continue;
 
     const charCount = block.text.join(" ").length;
     const rawDuration = block.end - block.start;
+
+    // How long does this block actually need?
     const neededForCps = charCount / MAX_CPS;
     const needed = Math.max(MIN_DURATION, MIN_DISPLAY, neededForCps);
 
     if (rawDuration < needed) {
+      // Extend end — never touch start
       block.end = block.start + needed;
     }
   }
@@ -603,20 +552,27 @@ const durationPass = (blocks: SrtBlock[]): SrtBlock[] => {
   return blocks;
 };
 
-/* -------- Pass 4: Resolve overlaps -------- */
+/* -------- Pass 3: Resolve overlaps (forward-only, no drift) -------- */
 
 const overlapPass = (blocks: SrtBlock[]): SrtBlock[] => {
-  const MIN_GAP = 0.001;
+  const MIN_GAP = 0.001; // 1 ms — blocks must not touch exactly
 
   for (let i = 0; i < blocks.length - 1; i++) {
     const current = blocks[i]!;
     const next = blocks[i + 1]!;
 
     if (current.end >= next.start) {
+      // Clip current's end to just before next starts.
+      // Never move current.start or next.start — that's what kills drift.
       const clipped = next.start - MIN_GAP;
-      current.end = clipped - current.start >= 0.5
-        ? clipped
-        : next.start - MIN_GAP;
+
+      // Only apply clip if it still leaves a visible block (>= 0.5s)
+      if (clipped - current.start >= 0.5) {
+        current.end = clipped;
+      } else {
+        // Block is too short to salvage; collapse it forward
+        current.end = next.start - MIN_GAP;
+      }
     }
   }
 
@@ -627,10 +583,9 @@ const overlapPass = (blocks: SrtBlock[]): SrtBlock[] => {
 
 const normalizeSrtTiming = (srt: string): string => {
   let blocks = parseSrt(srt);
-  if (blocks.length === 0) return srt;
+  if (blocks.length === 0) return srt; // Nothing parseable — return as-is
 
   blocks = mergePass(blocks);
-  blocks = orphanPass(blocks);
   blocks = durationPass(blocks);
   blocks = overlapPass(blocks);
 
