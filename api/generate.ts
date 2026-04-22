@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const DAILY_LIMIT = 2;
+  const DAILY_LIMIT = 50;
 
   const ip =
     (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Burst protection (5 seconds between requests)
   const now = Date.now();
   const last = lastRequestMap.get(ip);
-  if (last && now - last < 5000) {
+  if (last && now - last < 2000) {
     return res.status(429).json({
       error: "Please wait a few seconds before trying again.",
     });
